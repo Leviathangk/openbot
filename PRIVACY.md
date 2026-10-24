@@ -306,11 +306,12 @@ The service stores:
 - the first website visit of an account, when a browser sends it: the source category, platform
   name, first website page, day, allowlisted campaign tags, whether it came from a sign-in or a
   checkout, and the save time. Deleting the account removes it.
-- webhook routes: for each webhook routine of a host, the opaque route ID, the host ID, the owner
-  account ID, the link time, and the revocation time. When the routine stops using a route, or the
-  host is deleted, the service sets the revocation time and the route stops working. The service
+- webhook routes: for each webhook routine and each workflow webhook trigger of a host, the opaque
+  route ID, the host ID, the owner account ID, the link time, and the revocation time. When the
+  routine or workflow stops using a route, or the host is deleted, the service sets the revocation
+  time and the route stops working. The service
   keeps the row with these fields permanently, so that the old public URL never belongs to another
-  host. It does not store the routine, the secret, or request bodies.
+  host. It does not store the routine, the workflow, the secret, or request bodies.
 - published agent templates: the agent name, title, instructions, avatar, routine names, schedules
   and instructions, marketplace skill references, the `SKILL.md` text of local skills, the local
   agent ID, a share card image made from these fields, and creation and update times. Anyone
@@ -797,6 +798,34 @@ routine's model provider, as other routine input does.
 
 Change a routine to a schedule, or delete it, to stop its URL. Deleting a routine deletes its
 receipts.
+
+## Workflows
+
+A workflow is a graph of steps that the user draws on a canvas. The host stores each workflow, its
+graph, up to 50 earlier versions of the graph, its runs, and the input and output text of each step
+in its local SQLite database. A run also keeps a copy of the graph and, for a webhook run, the
+request body. Runs stay until the workflow is deleted. Nothing about a workflow goes to the account
+service, except the webhook route metadata above.
+
+- **Agent steps** send their input to the agent as a routine message. The agent's model provider
+  gets it, as with other routine input.
+- **Model and condition steps** send their input to the provider and model that the step names,
+  without tools.
+- **Outputs to a messaging place** post the workflow name and the text through that messaging
+  connection.
+- **Notifications** show the workflow name and at most 200 characters of text, with secrets
+  removed, only when notification previews are on.
+- **Webhook triggers** work like webhook routines: the same route metadata, Signal path, encrypted
+  signing secret, and 7-day receipts without the request body. The host refuses a body of more than
+  64,000 characters. The body, marked as data, is the trigger's output and goes to the next steps.
+  Remove the trigger, or delete the workflow, to stop its URL.
+
+Members of a joined server can read, change, and run a workflow when they can see and use each
+agent in it (`workflows-v1`). The graph and the step text then go to their computer. Only owners
+and administrators see a webhook URL or make a new signing secret.
+
+Deleting an agent keeps the workflows and their step history without the agent. Deleting a
+workflow deletes its versions, runs, steps, and receipts.
 
 ## Slack connections
 

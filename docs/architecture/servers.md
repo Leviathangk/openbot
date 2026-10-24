@@ -164,6 +164,33 @@ only to a connection with the capability and never for a hidden agent. Webhook c
 rotation and webhook test runs stay on `events-v1`. A client without the capability shows a notice
 in the Routines view; the web client shows the view switch only when the host serves it.
 
+### Workflows
+
+`workflows-v1` serves the workflow canvas (see [Workflows](agents.md#workflows)) to a joined desktop
+and to the web client. Its routes are `POST /v1/workflows/<name>` with the input in the body:
+`list`, `get`, `create`, `rename`, `delete`, `save-graph`, `versions`, `restore-version`,
+`start-run`, `run-step`, `stop-step`, `stop-run`, `retry-step`, `decide`, `runs`, `run` and
+`rotate-webhook-secret`. The contract header in `team-protocol/workflows-v1.ts` records the grant:
+
+- A member sees a workflow only when every agent of its agent steps is visible and no model step
+  names a provider that the member's protocol hides (a local-only provider hides it from every
+  peer, the owner on a remote client too). The host answers any other workflow, and its runs and
+  steps, with 404.
+- A change, a restore or a run also needs the chat level for each named agent, before and after the
+  change (403 `agentViewOnly`). A restore checks the graph of the version.
+- Only an owner or admin can add an output that posts to a messaging place, or change its place
+  (403 `adminRequired`); a member can keep and run one that is there.
+- A step of an agent that is hidden now does not cross: the generic hidden-agent filter of the
+  answer drops it.
+- A webhook trigger's URL goes only to an owner or admin; a member reads it as null. Only an owner
+  or admin can make a new secret.
+- Step output and error cross with at most 32,000 characters each, and a run sends its newest
+  2,000 steps. When a page of runs would not fit one WebRTC frame, the host empties the step texts
+  of the oldest runs first, then answers 413 `tooLargeToSend`.
+
+The optional event `workflows-changed { workflowId }` names the workflow that changed, so the
+client reads it again. A client without the capability shows `serverTooOld` on the Workflows page.
+
 ### History extent
 
 `history-extent-v1` lets the chat's scroll rail draw the history that is not loaded on a joined server.
