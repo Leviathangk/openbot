@@ -49,6 +49,7 @@ import { messages as usage } from "./usage";
 import { messages as vault } from "./vault";
 import { messages as webClient } from "./webClient";
 import { messages as window } from "./window";
+import { messages as workflow } from "./workflow";
 
 /**
  * The English source catalog. It is the key list every translation must satisfy and the text a
@@ -102,6 +103,7 @@ export const en = {
   ...sidebar,
   ...channel,
   ...diagram,
+  ...workflow,
   ...agent,
   ...agentTemplate,
   ...importAgent,

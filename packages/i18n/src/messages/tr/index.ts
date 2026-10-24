@@ -50,6 +50,7 @@ import { messages as usage } from "./usage";
 import { messages as vault } from "./vault";
 import { messages as webClient } from "./webClient";
 import { messages as window } from "./window";
+import { messages as workflow } from "./workflow";
 
 /**
  * Turkish. Written from the English source: a key that is missing here renders its English source.
@@ -97,6 +98,7 @@ export const tr = {
   ...sidebar,
   ...channel,
   ...diagram,
+  ...workflow,
   ...agent,
   ...agentTemplate,
   ...importAgent,

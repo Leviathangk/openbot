@@ -3,12 +3,16 @@
  * get it in the add menu or in the node's choices; the host still refuses it in a run.
  */
 
+import type { ProviderLogoVariant } from "@openbot/brand";
 import {
+  type ClientAgentModelOption,
+  type StoredFileRow,
   WORKFLOW_NODE_KINDS,
   type WorkflowNodeKind,
   type WorkflowOutputTarget,
   type WorkflowTriggerType,
 } from "@openbot/contracts/ipc";
+import type { AgentProfile } from "../../data";
 
 export interface WorkflowFeatures {
   /** The node kinds that the add menu offers. */
@@ -31,3 +35,36 @@ export const WORKFLOW_FEATURES_V1: WorkflowFeatures = {
   uploads: false,
   presence: false,
 };
+
+/** A place that a message trigger listens to or that an output posts to, such as a channel. */
+export interface WorkflowPlace {
+  connectionId: string;
+  placeId: string;
+  /** The name of the place, as the user knows it, such as "#general". */
+  label: string;
+}
+
+/** A model that an image step can draw with. */
+export interface WorkflowImageModel {
+  id: string;
+  name: string;
+  /** The logo of the model. */
+  provider: ProviderLogoVariant;
+  /** The company that makes the model. */
+  maker: string;
+}
+
+/**
+ * The choices that the nodes offer, from the host. A new node takes the first choice where it must
+ * have one, such as the agent of an agent step or the model of a model call.
+ */
+export interface WorkflowCatalogs {
+  agents: readonly AgentProfile[];
+  models: readonly ClientAgentModelOption[];
+  places: readonly WorkflowPlace[];
+  imageModels: readonly WorkflowImageModel[];
+  /** The workspace files that an asset node can take, and the images that image steps made. */
+  files: readonly StoredFileRow[];
+  /** The name of the user, which a sticky note shows as its author. */
+  self?: string;
+}

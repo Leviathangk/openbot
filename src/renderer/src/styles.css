@@ -35,6 +35,7 @@
 @import "./features/channels/channels.css";
 @import "@openbot/ui/features/channels/channel-activity.css";
 @import "@openbot/ui/features/diagrams/diagrams.css";
+@import "@openbot/ui/features/workflows/workflow-nodes.css";
 @import "@openbot/ui/features/usage/agent-usage-report.css";
 @import "./features/usage/usage.css";
 @import "./features/schedule/schedule.css";
