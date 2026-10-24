@@ -229,7 +229,7 @@ import { recordAgentRestartActivity } from "./restart-activity";
 import type { RoutineFlowTools } from "./routine-flows/routine-flow-tools";
 import { RoutineRecords } from "./routine-records";
 import type { RoutineHoldWindow } from "./routine-store";
-import { RoutineTimer } from "./routine-timer";
+import { type RoutineDueSource, RoutineTimer } from "./routine-timer";
 import type { SidebarLayoutStore } from "./sidebar-layout-store";
 import type { VaultItems } from "./vault-items";
 import {
@@ -318,6 +318,11 @@ export interface AgentServiceOptions {
    * sender. The main process owns the preference. Omitted, the host system zone.
    */
   timezone?: () => string;
+  /**
+   * Other owners of scheduled work on the same routine timer, such as workflow triggers. They are
+   * read on each arm, because the main process builds them after this service.
+   */
+  extraRoutineSources?: () => Iterable<RoutineDueSource>;
   /**
    * The access level of the person who asked a channel member to add or remove an agent, for that
    * agent, as the Team API gives it for their own save. Omitted, `manage`.
@@ -530,10 +535,10 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       emitError: (code, error, agentId) => this.#emitError(code, error, agentId),
       ...(options.agentMemoryLimit ? { limit: options.agentMemoryLimit } : {}),
     });
-    // One timer for both routine owners. The sources are read lazily because `channels` and its
+    // One timer for every routine owner. The sources are read lazily because `channels` and its
     // scheduler are built further down, and because an owner's earliest routine changes constantly.
     this.#routineTimer = new RoutineTimer(
-      () => [this.#routines, this.#channelRoutines],
+      () => [this.#routines, this.#channelRoutines, ...(options.extraRoutineSources?.() ?? [])],
       () => this.#initialized && !this.#stopping,
       (code, error) => this.#emitError(code, error),
     );
@@ -1593,6 +1598,11 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       .removeAsUser(input.name)
       .pipe(Effect.mapError((cause) => new AgentLifecycleFailed({ operation: "delete table", cause })));
   }).bind(this);
+
+  /** Plans the routine timer again, after an outside source changed its next due time. */
+  armRoutines(): void {
+    this.#routineTimer.arm();
+  }
 
   /** Holds routine firing while the system sleeps. See RoutineTimer.suspend. */
   suspendRoutines(): void {

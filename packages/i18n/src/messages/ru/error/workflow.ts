@@ -26,5 +26,15 @@ export const messages = {
   "error.workflow.runMissing": "Этого запуска больше нет.",
   "error.workflow.notRetryable": "Снова можно запустить только шаг, который завершился ошибкой или был остановлен.",
   "error.workflow.noDecision": "Этот шаг не ждет решения.",
-  "error.workflow.outputPending": "Эта версия OpenBot пока не может публиковать в канал.",
+  "error.workflow.outputPlaceMissing": "Выберите место в мессенджере для этого вывода.",
+  "error.workflow.outputConnectionOff":
+    "Подключение мессенджера для этого вывода выключено или удалено. Выберите место снова.",
+  "error.workflow.outputNotRunning": "Подключение мессенджера сейчас не работает. Повторите, когда оно заработает.",
+  "error.workflow.outputRefused": "Место отклонило публикацию. Убедитесь, что OpenBot может публиковать там.",
+  "error.workflow.outputUncertain":
+    "Публикация остановилась на полпути. Часть её может уже быть в этом месте. Проверьте перед повтором.",
+  "error.workflow.tooLargeToSend":
+    "Этот рабочий процесс слишком большой, чтобы отправить его на другой компьютер. Откройте его на компьютере, где работает сервер.",
+  "error.workflow.webhookMissing":
+    "Этот шаг не является триггером веб-хука. Сохраните рабочий процесс и повторите попытку.",
 } as const satisfies PartialTranslation<typeof source>;

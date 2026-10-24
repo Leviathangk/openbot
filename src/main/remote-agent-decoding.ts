@@ -47,6 +47,14 @@ import {
   isRoutineFlowLink,
   isRoutineRun,
   isSidebarLayoutSnapshot,
+  isWorkflowDetail,
+  isWorkflowRunDetail,
+  isWorkflowRunPage,
+  isWorkflowSaveResult,
+  isWorkflowStep,
+  isWorkflowSummary,
+  isWorkflowVersion,
+  isWorkflowWebhookSecret,
 } from "@openbot/contracts/ipc";
 import { decodeRecord, guardedDecoder, guardedListDecoder } from "@openbot/contracts/ipc-decoding";
 import { isDynamicRecord, isNumber, isString } from "@openbot/contracts/runtime-values";
@@ -193,6 +201,27 @@ export const decodeRoutineRun = guardedDecoder(isRoutineRun, "remote routine run
 export const decodeRoutineRuns = guardedListDecoder(isRoutineRun, "remote routine history");
 export const decodeRemoteRoutineFlowCanvas = guardedDecoder(isRoutineFlowCanvas, "remote routine flow canvas");
 export const decodeRemoteRoutineFlowLink = guardedDecoder(isRoutineFlowLink, "remote routine flow link");
+export const decodeRemoteWorkflowSummary = guardedDecoder(isWorkflowSummary, "remote workflow");
+export const decodeRemoteWorkflowDetail = guardedDecoder(isWorkflowDetail, "remote workflow");
+export const decodeRemoteWorkflowSaveResult = guardedDecoder(isWorkflowSaveResult, "remote workflow save result");
+export const decodeRemoteWorkflowRunDetail = guardedDecoder(isWorkflowRunDetail, "remote workflow run");
+export const decodeRemoteWorkflowRunPage = guardedDecoder(isWorkflowRunPage, "remote workflow runs");
+export const decodeRemoteWorkflowStep = guardedDecoder(isWorkflowStep, "remote workflow step");
+export const decodeRemoteWorkflowSecret = guardedDecoder(isWorkflowWebhookSecret, "remote workflow webhook secret");
+const decodeWorkflowSummaries = guardedListDecoder(isWorkflowSummary, "remote workflow list");
+const decodeWorkflowVersions = guardedListDecoder(isWorkflowVersion, "remote workflow versions");
+
+/** The `workflows-v1` list route wraps its list as `{ workflows }`. */
+export function decodeRemoteWorkflowList(value: unknown) {
+  if (!isDynamicRecord(value)) throw new Error("Invalid remote workflow list.");
+  return decodeWorkflowSummaries(value.workflows);
+}
+
+/** The `workflows-v1` versions route wraps its list as `{ versions }`. */
+export function decodeRemoteWorkflowVersions(value: unknown) {
+  if (!isDynamicRecord(value)) throw new Error("Invalid remote workflow versions.");
+  return decodeWorkflowVersions(value.versions);
+}
 
 export function decodeSidebarLayoutSnapshot(value: unknown): SidebarLayoutSnapshot {
   if (!isSidebarLayoutSnapshot(value)) throw new Error("Invalid sidebar layout response.");

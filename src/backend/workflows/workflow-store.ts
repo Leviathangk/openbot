@@ -6,6 +6,7 @@
  */
 
 import {
+  isRoutineSchedule,
   isWorkflowEdge,
   isWorkflowGraph,
   isWorkflowNode,
@@ -53,6 +54,16 @@ const PROBLEM_TEXT = {
   duplicate: "error.workflow.duplicateEdge",
   cycle: "error.workflow.cycle",
 } as const satisfies Record<WorkflowGraphProblem, string>;
+
+/** A schedule trigger whose next occurrence came. */
+export interface DueWorkflowTrigger {
+  workflowId: string;
+  nodeId: string;
+  schedule: RoutineSchedule;
+  timezone: string | null;
+  /** The occurrence that came, as stored. */
+  dueAt: string;
+}
 
 export interface WorkflowStoreOptions {
   database: OpenBotDatabase;
@@ -145,6 +156,59 @@ export class WorkflowStore {
     });
   }
 
+  /** The earliest next occurrence of any schedule trigger, or null. */
+  nextTriggerDueAt(): string | null {
+    const row = databaseRow(
+      this.#database.connection
+        .prepare(
+          `SELECT MIN(next_due_at) AS due FROM workflow_triggers
+           WHERE enabled = 1 AND kind = 'schedule' AND next_due_at IS NOT NULL`,
+        )
+        .get(),
+    );
+    return row ? optionalStringColumn(row, "due") : null;
+  }
+
+  /** The schedule triggers whose next occurrence is not after `now`, earliest first. */
+  dueTriggers(now: Date): DueWorkflowTrigger[] {
+    return databaseRows(
+      this.#database.connection
+        .prepare(
+          `SELECT workflow_id, node_id, schedule_json, timezone, next_due_at FROM workflow_triggers
+           WHERE enabled = 1 AND kind = 'schedule' AND next_due_at IS NOT NULL AND next_due_at <= ?
+           ORDER BY next_due_at, workflow_id, node_id`,
+        )
+        .all(now.toISOString()),
+    ).flatMap((row) => {
+      const schedule = JSON.parse(optionalStringColumn(row, "schedule_json") ?? "null");
+      // The save checked the schedule; a row without one has nothing to plan.
+      if (!isRoutineSchedule(schedule)) return [];
+      return [
+        {
+          workflowId: requiredStringColumn(row, "workflow_id"),
+          nodeId: requiredStringColumn(row, "node_id"),
+          schedule,
+          timezone: optionalStringColumn(row, "timezone"),
+          dueAt: requiredStringColumn(row, "next_due_at"),
+        },
+      ];
+    });
+  }
+
+  /**
+   * Moves a schedule trigger to its next occurrence. It changes nothing when a save planned the
+   * trigger again after `dueAt` was read, so the new plan stays.
+   */
+  advanceTrigger(due: DueWorkflowTrigger, nextDueAt: string | null, scheduledFor: string, now = new Date()): boolean {
+    const result = this.#database.connection
+      .prepare(
+        `UPDATE workflow_triggers SET next_due_at = ?, last_scheduled_for = ?, updated_at = ?
+         WHERE workflow_id = ? AND node_id = ? AND next_due_at = ?`,
+      )
+      .run(nextDueAt, scheduledFor, now.toISOString(), due.workflowId, due.nodeId, due.dueAt);
+    return Number(result.changes) > 0;
+  }
+
   versions(workflowId: string): WorkflowVersion[] {
     return databaseRows(
       this.#database.connection
@@ -154,6 +218,16 @@ export class WorkflowStore {
         )
         .all(workflowId),
     ).map(toVersion);
+  }
+
+  /** The graph of one version, or null when the workflow has no such version. A version never changes. */
+  versionGraph(workflowId: string, versionId: string): WorkflowGraph | null {
+    const row = databaseRow(
+      this.#database.connection
+        .prepare("SELECT graph_json FROM workflow_versions WHERE workflow_id = ? AND version_id = ?")
+        .get(workflowId, versionId),
+    );
+    return row ? storedGraph(requiredStringColumn(row, "graph_json")) : null;
   }
 
   /** Puts a version's graph back. The graph before it becomes a `restore` version, so the restore can be undone. */

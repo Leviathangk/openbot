@@ -695,7 +695,7 @@ function registerIpcHandlers({
     ...sharedTableIpcHandlers({ service, remoteServers }),
     ...routineIpcHandlers({ service, remoteServers }),
     ...routineFlowIpcHandlers({ routineFlows, remoteServers }),
-    ...workflowIpcHandlers({ workflows }),
+    ...workflowIpcHandlers({ workflows, events, remoteServers }),
     ...routineResultIpcHandlers({ routineResults }),
     ...channelMemoryIpcHandlers({ service, remoteServers }),
     ...channelRoutineIpcHandlers({ service, remoteServers }),
@@ -1137,6 +1137,8 @@ if (!hasSingleInstanceLock) {
         switch (event.type) {
           case "routines-changed":
           case "channel-routines-changed":
+          // A save or a delete can remove a webhook trigger, and a new secret can add a route.
+          case "workflows-changed":
             built.eventsRuntime.syncRoutes({ all: false });
             return;
           case "agents-changed": {

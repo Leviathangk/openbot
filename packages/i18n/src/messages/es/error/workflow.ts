@@ -26,5 +26,16 @@ export const messages = {
   "error.workflow.runMissing": "Esta ejecución ya no existe.",
   "error.workflow.notRetryable": "Solo un paso que falló o se detuvo puede ejecutarse de nuevo.",
   "error.workflow.noDecision": "Este paso no espera una decisión.",
-  "error.workflow.outputPending": "Esta versión de OpenBot aún no puede publicar en un canal.",
+  "error.workflow.outputPlaceMissing": "Elige un lugar de mensajería para esta salida.",
+  "error.workflow.outputConnectionOff":
+    "La conexión de mensajería de esta salida está desactivada o se eliminó. Elige un lugar de nuevo.",
+  "error.workflow.outputNotRunning":
+    "La conexión de mensajería no está en marcha ahora. Inténtalo de nuevo cuando lo esté.",
+  "error.workflow.outputRefused": "El lugar rechazó la publicación. Asegúrate de que OpenBot pueda publicar allí.",
+  "error.workflow.outputUncertain":
+    "La publicación se detuvo a medio camino. Una parte puede estar ya en el lugar. Revísalo antes de intentarlo de nuevo.",
+  "error.workflow.tooLargeToSend":
+    "Este flujo de trabajo es demasiado grande para enviarlo a otro ordenador. Ábrelo en el ordenador que ejecuta el servidor.",
+  "error.workflow.webhookMissing":
+    "Este paso no es un disparador de webhook. Guarda el flujo de trabajo y vuelve a intentarlo.",
 } as const satisfies PartialTranslation<typeof source>;

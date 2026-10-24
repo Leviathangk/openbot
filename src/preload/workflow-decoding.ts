@@ -8,6 +8,7 @@ import {
   isWorkflowStep,
   isWorkflowSummary,
   isWorkflowVersion,
+  isWorkflowWebhookSecret,
 } from "@openbot/contracts/ipc";
 import { guardedDecoder, guardedListDecoder } from "@openbot/contracts/ipc-decoding";
 
@@ -19,3 +20,4 @@ export const decodeWorkflowVersions = guardedListDecoder(isWorkflowVersion, "wor
 export const decodeWorkflowRunDetail = guardedDecoder(isWorkflowRunDetail, "workflow run response");
 export const decodeWorkflowRunPage = guardedDecoder(isWorkflowRunPage, "workflow runs response");
 export const decodeWorkflowStep = guardedDecoder(isWorkflowStep, "workflow step response");
+export const decodeWorkflowWebhookSecret = guardedDecoder(isWorkflowWebhookSecret, "workflow webhook secret response");

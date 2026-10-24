@@ -26,5 +26,16 @@ export const messages = {
   "error.workflow.runMissing": "この実行はもう存在しません。",
   "error.workflow.notRetryable": "再実行できるのは、失敗または停止したステップだけです。",
   "error.workflow.noDecision": "このステップは判断を待っていません。",
-  "error.workflow.outputPending": "このバージョンの OpenBot はまだチャンネルに投稿できません。",
+  "error.workflow.outputPlaceMissing": "この出力のメッセージングの投稿先を選んでください。",
+  "error.workflow.outputConnectionOff":
+    "この出力のメッセージング接続はオフか、削除されています。投稿先をもう一度選んでください。",
+  "error.workflow.outputNotRunning":
+    "メッセージング接続は現在動作していません。動作しているときにもう一度試してください。",
+  "error.workflow.outputRefused": "投稿先が投稿を拒否しました。OpenBot がそこに投稿できることを確認してください。",
+  "error.workflow.outputUncertain":
+    "投稿が途中で止まりました。一部がすでに投稿先にある可能性があります。もう一度試す前に確認してください。",
+  "error.workflow.tooLargeToSend":
+    "このワークフローは大きすぎるため、別のコンピューターに送信できません。サーバーを実行しているコンピューターで開いてください。",
+  "error.workflow.webhookMissing":
+    "このステップは Webhook トリガーではありません。ワークフローを保存してから、もう一度お試しください。",
 } as const satisfies PartialTranslation<typeof source>;

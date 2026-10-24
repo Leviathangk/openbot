@@ -10,6 +10,7 @@ import {
   parseSaveWorkflowGraph,
   parseStartWorkflowRun,
   parseWorkflowRuns,
+  parseWorkflowTrigger,
 } from "./workflow-inputs";
 
 const node = (id: string, fields: object = {}) => ({ id, kind: "prompt", at: { x: 0, y: 0 }, fields });
@@ -88,6 +89,10 @@ describe("workflow payloads from the renderer", () => {
       stepId: "s",
       approved: false,
     });
+    expect(parseWorkflowTrigger({ workflowId: "w", nodeId: "n", secret: "whsec_x" })).toEqual({
+      workflowId: "w",
+      nodeId: "n",
+    });
   });
 
   it.each([
@@ -100,6 +105,7 @@ describe("workflow payloads from the renderer", () => {
       () => parseWorkflowRuns({ workflowId: "w", limit: INPUT_LIMITS.workflowRunsPage + 1 }),
     ],
     ["a runs page of zero", () => parseWorkflowRuns({ workflowId: "w", limit: 0 })],
+    ["a webhook secret request without a node", () => parseWorkflowTrigger({ workflowId: "w" })],
   ])("refuses %s", (_name, parse) => {
     expect(parse).toThrow();
   });

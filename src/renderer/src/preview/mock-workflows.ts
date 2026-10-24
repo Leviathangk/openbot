@@ -386,5 +386,7 @@ export function mockWorkflows(
       };
     },
     run: async (runId) => runDetail(runId),
+    // The preview has no relay, so the secret is only for the dialog that shows it.
+    rotateWebhookSecret: async () => ({ secret: `whsec_preview_${crypto.randomUUID()}` }),
   };
 }

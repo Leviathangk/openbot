@@ -97,6 +97,7 @@ import {
   TEAM_UI_BLOCKS_CAPABILITY,
   type TeamCurrentCapability,
   WEBHOOK_TESTS_CAPABILITY,
+  WORKFLOWS_CAPABILITY,
 } from "@openbot/contracts/team-protocol/current";
 import { FOCUS_USE_INTERVAL_MS } from "@openbot/contracts/team-protocol/focus-use-v1";
 import {
@@ -220,6 +221,7 @@ import { routeSignInRelay } from "./team-api/route-sign-in-relay";
 import { routeSkillsAdmin } from "./team-api/route-skills-admin";
 import { routeStorage } from "./team-api/route-storage";
 import { routeTeam } from "./team-api/route-team";
+import { routeWorkflows } from "./team-api/route-workflows";
 import { routeWorkspaceDirectory } from "./team-api/route-workspace-directory";
 import { TeamStoreError } from "./team-store";
 
@@ -890,6 +892,7 @@ export class TeamApiServer {
       if ((await routeSideQuestion(context, this.#options.agents, hidden)) === "handled") return;
       if ((await routeRoutineFlows(context, this.#options.routineFlows, this.#options.agents, hidden)) === "handled")
         return;
+      if ((await routeWorkflows(context, this.#options.workflows, this.#options.agents, hidden)) === "handled") return;
       if ((await this.#routeEvents(context)) === "handled") return;
       if ((await routeAgentImport(context, this.#options.agentImport, newAgentHidden)) === "handled") return;
       if ((await routeInstanceTransfer(context, this.#options.instanceTransfer, newAgentHidden)) === "handled") return;
@@ -1194,8 +1197,6 @@ export class TeamApiServer {
       const supportsRuntimeSnapshots = connection.capabilities.has("agent-runtime-snapshots");
       const requiredCapability = eventCapability(event);
       if (requiredCapability && !connection.capabilities.has(requiredCapability)) continue;
-      // No Team API protocol describes workflows yet, so no joined client gets their event.
-      if (event.type === "workflows-changed") continue;
       // A task conversation follows the conversation scope too: a desktop asks for it only for its active server.
       if (
         (event.type === "conversation" ||
@@ -1945,6 +1946,7 @@ export class TeamApiServer {
         if (capability === INSTANCE_TRANSFER_CAPABILITY) return this.#options.instanceTransfer !== undefined;
         if (capability === LIVE_ACTIVITY_PUSH_CAPABILITY) return this.#options.liveActivityPush !== undefined;
         if (capability === ROUTINE_FLOWS_CAPABILITY) return this.#options.routineFlows !== undefined;
+        if (capability === WORKFLOWS_CAPABILITY) return this.#options.workflows !== undefined;
         if (capability === PUSH_NOTIFICATIONS_CAPABILITY || capability === ANDROID_PUSH_NOTIFICATIONS_CAPABILITY)
           return this.#options.pushNotifications !== undefined;
         if (capability === FOCUS_USE_CAPABILITY) return this.#options.focusUse === true;
@@ -2105,6 +2107,7 @@ function eventCapability(event: AgentEvent): TeamCurrentCapability | null {
     return AGENT_TASKS_CAPABILITY;
   if (event.type === "skills-changed") return SKILLS_EVENTS_CAPABILITY;
   if (event.type === "routine-flows-changed") return ROUTINE_FLOWS_CAPABILITY;
+  if (event.type === "workflows-changed") return WORKFLOWS_CAPABILITY;
   if (event.type === "turn-progress") return TEAM_AGENT_ACTIVITY_CAPABILITY;
   if (event.type === "runtime-snapshot") return "agent-runtime-snapshots";
   if (event.type === "sidebar-layout-changed") return "sidebar-layout";

@@ -25,5 +25,15 @@ export const messages = {
   "error.workflow.runMissing": "Bu çalıştırma artık yok.",
   "error.workflow.notRetryable": "Yalnızca başarısız olan veya durdurulan bir adım yeniden çalışabilir.",
   "error.workflow.noDecision": "Bu adım bir karar beklemiyor.",
-  "error.workflow.outputPending": "OpenBot'un bu sürümü henüz bir kanala gönderi yapamaz.",
+  "error.workflow.outputPlaceMissing": "Bu çıktı için bir mesajlaşma yeri seçin.",
+  "error.workflow.outputConnectionOff":
+    "Bu çıktının mesajlaşma bağlantısı kapalı ya da kaldırılmış. Yeniden bir yer seçin.",
+  "error.workflow.outputNotRunning": "Mesajlaşma bağlantısı şu anda çalışmıyor. Çalıştığında yeniden deneyin.",
+  "error.workflow.outputRefused": "Yer gönderiyi reddetti. OpenBot'un orada gönderi yapabildiğinden emin olun.",
+  "error.workflow.outputUncertain":
+    "Gönderi yolda durdu. Bir kısmı yerde olabilir. Yeniden denemeden önce kontrol edin.",
+  "error.workflow.tooLargeToSend":
+    "Bu iş akışı başka bir bilgisayara gönderilemeyecek kadar büyük. Sunucuyu çalıştıran bilgisayarda açın.",
+  "error.workflow.webhookMissing":
+    "Bu adım bir webhook tetikleyicisi değil. İş akışını kaydedin, sonra yeniden deneyin.",
 } as const satisfies PartialTranslation<typeof source>;

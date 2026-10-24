@@ -284,6 +284,7 @@ import {
   decodeWorkflowSummaries,
   decodeWorkflowSummary,
   decodeWorkflowVersions,
+  decodeWorkflowWebhookSecret,
 } from "./workflow-decoding";
 
 const attachmentImportListeners = new Set<(event: AttachmentImportEvent) => void>();
@@ -705,6 +706,7 @@ const openbotApi: OpenBotDesktopApi = {
     decide: decodeVoid,
     runs: decodeWorkflowRunPage,
     run: decodeWorkflowRunDetail,
+    rotateWebhookSecret: decodeWorkflowWebhookSecret,
   }),
   routineResults: bridgeGroup(IPC_ENDPOINTS.routineResults, {
     options: decodeRoutineResultOptions,

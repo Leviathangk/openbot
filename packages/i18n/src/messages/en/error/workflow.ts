@@ -24,5 +24,14 @@ export const messages = defineMessages("error.workflow", {
   "error.workflow.runMissing": "This run no longer exists.",
   "error.workflow.notRetryable": "Only a step that failed or stopped can run again.",
   "error.workflow.noDecision": "This step does not wait for a decision.",
-  "error.workflow.outputPending": "This version of OpenBot cannot post to a channel yet.",
+  "error.workflow.outputPlaceMissing": "Choose a messaging place for this output.",
+  "error.workflow.outputConnectionOff":
+    "The messaging connection of this output is off or removed. Choose a place again.",
+  "error.workflow.outputNotRunning": "The messaging connection does not run now. Try again when it runs.",
+  "error.workflow.outputRefused": "The place refused the post. Make sure that OpenBot can post there.",
+  "error.workflow.outputUncertain":
+    "The post stopped on its way. Part of it can be in the place. Look there before you try again.",
+  "error.workflow.tooLargeToSend":
+    "This workflow is too large to send to another computer. Open it on the computer that runs the server.",
+  "error.workflow.webhookMissing": "This step is not a webhook trigger. Save the workflow, then try again.",
 });

@@ -1,9 +1,26 @@
-// Workflows: graphs of steps drawn on a canvas. This computer's host answers from its own runtime. A
-// joined server does not answer workflows yet, so the remote arm says so.
+// Workflows: graphs of steps drawn on a canvas. This computer's host answers from its own runtime,
+// and its events service owns webhook secrets. A joined server answers through `workflows-v1`.
 
+import { WORKFLOWS_CAPABILITY, WORKFLOWS_ROUTES } from "@openbot/contracts/team-protocol/workflows-v1";
 import { sourceText } from "@openbot/i18n/source";
+import type { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
 import type { WorkflowsHandle } from "../../backend/workflows/workflows";
+import type { HostEventsService } from "../host-events-service";
+import {
+  decodeRemoteWorkflowDetail,
+  decodeRemoteWorkflowList,
+  decodeRemoteWorkflowRunDetail,
+  decodeRemoteWorkflowRunPage,
+  decodeRemoteWorkflowSaveResult,
+  decodeRemoteWorkflowSecret,
+  decodeRemoteWorkflowStep,
+  decodeRemoteWorkflowSummary,
+  decodeRemoteWorkflowVersions,
+} from "../remote-agent-decoding";
+import { acceptEmpty, type ResponseDecoder } from "../remote-host-decoding";
+import type { RemoteRequestInit } from "../remote-server-client";
+import type { RemoteWorkflowError } from "../remote-service-effects";
 import type { IpcGroupHandlers } from "./define-ipc-group";
 import { scopedHandler, scopedQueryHandler } from "./scoped-handler";
 import {
@@ -19,52 +36,110 @@ import {
   parseWorkflowRunId,
   parseWorkflowRuns,
   parseWorkflowStepId,
+  parseWorkflowTrigger,
 } from "./workflow-inputs";
+
+interface WorkflowRemoteServers {
+  supportsCapability(serverId: string, capability: typeof WORKFLOWS_CAPABILITY): boolean;
+  request<T>(
+    serverId: string,
+    path: string,
+    decoder: ResponseDecoder<T>,
+    init?: RemoteRequestInit,
+  ): Effect.Effect<T, RemoteWorkflowError>;
+}
 
 interface WorkflowIpcDependencies {
   workflows: WorkflowsHandle;
+  events: Pick<HostEventsService, "rotateWorkflowSecret">;
+  remoteServers: WorkflowRemoteServers;
 }
 
-export function workflowIpcHandlers({ workflows }: WorkflowIpcDependencies): Pick<IpcGroupHandlers, "workflows"> {
-  const remote = (): never => {
-    throw new Error(sourceText("error.workflow.serverTooOld"));
-  };
+export function workflowIpcHandlers({
+  workflows,
+  events,
+  remoteServers,
+}: WorkflowIpcDependencies): Pick<IpcGroupHandlers, "workflows"> {
+  function remote<T>(serverId: string, path: string, decoder: ResponseDecoder<T>, body: unknown): Promise<T> {
+    if (!remoteServers.supportsCapability(serverId, WORKFLOWS_CAPABILITY))
+      throw new Error(sourceText("error.workflow.serverTooOld"));
+    return runCauseEffect(remoteServers.request(serverId, path, decoder, { method: "POST", body }));
+  }
   return {
     workflows: {
-      list: scopedQueryHandler({ local: () => runCauseEffect(workflows.list()), remote }),
-      get: scopedHandler(parseWorkflowId, { local: (id) => runCauseEffect(workflows.get(id)), remote }),
-      create: scopedHandler(parseCreateWorkflow, { local: (input) => runCauseEffect(workflows.create(input)), remote }),
-      rename: scopedHandler(parseRenameWorkflow, { local: (input) => runCauseEffect(workflows.rename(input)), remote }),
-      delete: scopedHandler(parseWorkflowId, { local: (id) => runCauseEffect(workflows.remove(id)), remote }),
+      list: scopedQueryHandler({
+        local: () => runCauseEffect(workflows.list()),
+        remote: (serverId) => remote(serverId, WORKFLOWS_ROUTES.list, decodeRemoteWorkflowList, {}),
+      }),
+      get: scopedHandler(parseWorkflowId, {
+        local: (id) => runCauseEffect(workflows.get(id)),
+        remote: (workflowId, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.get, decodeRemoteWorkflowDetail, { workflowId }),
+      }),
+      create: scopedHandler(parseCreateWorkflow, {
+        local: (input) => runCauseEffect(workflows.create(input)),
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.create, decodeRemoteWorkflowDetail, input),
+      }),
+      rename: scopedHandler(parseRenameWorkflow, {
+        local: (input) => runCauseEffect(workflows.rename(input)),
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.rename, decodeRemoteWorkflowSummary, input),
+      }),
+      delete: scopedHandler(parseWorkflowId, {
+        local: (id) => runCauseEffect(workflows.remove(id)),
+        remote: (workflowId, serverId) => remote(serverId, WORKFLOWS_ROUTES.delete, acceptEmpty, { workflowId }),
+      }),
       saveGraph: scopedHandler(parseSaveWorkflowGraph, {
         local: (input) => runCauseEffect(workflows.saveGraph(input)),
-        remote,
+        remote: (input, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.saveGraph, decodeRemoteWorkflowSaveResult, input),
       }),
-      versions: scopedHandler(parseWorkflowId, { local: (id) => runCauseEffect(workflows.versions(id)), remote }),
+      versions: scopedHandler(parseWorkflowId, {
+        local: (id) => runCauseEffect(workflows.versions(id)),
+        remote: (workflowId, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.versions, decodeRemoteWorkflowVersions, { workflowId }),
+      }),
       restoreVersion: scopedHandler(parseRestoreWorkflowVersion, {
         local: (input) => runCauseEffect(workflows.restoreVersion(input)),
-        remote,
+        remote: (input, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.restoreVersion, decodeRemoteWorkflowDetail, input),
       }),
       startRun: scopedHandler(parseStartWorkflowRun, {
         local: (input) => runCauseEffect(workflows.startRun(input)),
-        remote,
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.startRun, decodeRemoteWorkflowRunDetail, input),
       }),
       runStep: scopedHandler(parseRunWorkflowStep, {
         local: (input) => runCauseEffect(workflows.runStep(input)),
-        remote,
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.runStep, decodeRemoteWorkflowStep, input),
       }),
-      stopStep: scopedHandler(parseWorkflowStepId, { local: (id) => runCauseEffect(workflows.stopStep(id)), remote }),
-      stopRun: scopedHandler(parseWorkflowRunId, { local: (id) => runCauseEffect(workflows.stopRun(id)), remote }),
+      stopStep: scopedHandler(parseWorkflowStepId, {
+        local: (id) => runCauseEffect(workflows.stopStep(id)),
+        remote: (stepId, serverId) => remote(serverId, WORKFLOWS_ROUTES.stopStep, acceptEmpty, { stepId }),
+      }),
+      stopRun: scopedHandler(parseWorkflowRunId, {
+        local: (id) => runCauseEffect(workflows.stopRun(id)),
+        remote: (runId, serverId) => remote(serverId, WORKFLOWS_ROUTES.stopRun, acceptEmpty, { runId }),
+      }),
       retryStep: scopedHandler(parseRetryWorkflowStep, {
         local: (input) => runCauseEffect(workflows.retryStep(input)),
-        remote,
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.retryStep, decodeRemoteWorkflowStep, input),
       }),
       decide: scopedHandler(parseDecideWorkflowStep, {
         local: (input) => runCauseEffect(workflows.decide(input)),
-        remote,
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.decide, acceptEmpty, input),
       }),
-      runs: scopedHandler(parseWorkflowRuns, { local: (input) => runCauseEffect(workflows.runs(input)), remote }),
-      run: scopedHandler(parseWorkflowRunId, { local: (id) => runCauseEffect(workflows.run(id)), remote }),
+      runs: scopedHandler(parseWorkflowRuns, {
+        local: (input) => runCauseEffect(workflows.runs(input)),
+        remote: (input, serverId) => remote(serverId, WORKFLOWS_ROUTES.runs, decodeRemoteWorkflowRunPage, input),
+      }),
+      run: scopedHandler(parseWorkflowRunId, {
+        local: (id) => runCauseEffect(workflows.run(id)),
+        remote: (runId, serverId) => remote(serverId, WORKFLOWS_ROUTES.run, decodeRemoteWorkflowRunDetail, { runId }),
+      }),
+      rotateWebhookSecret: scopedHandler(parseWorkflowTrigger, {
+        local: (input) => runCauseEffect(events.rotateWorkflowSecret(input)),
+        remote: (input, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.rotateWebhookSecret, decodeRemoteWorkflowSecret, input),
+      }),
     },
   };
 }

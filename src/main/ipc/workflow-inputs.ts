@@ -13,6 +13,7 @@ import {
   isSaveWorkflowGraphInput,
   isStartWorkflowRunInput,
   isWorkflowRunsInput,
+  isWorkflowTriggerInput,
   type RenameWorkflowInput,
   type RestoreWorkflowVersionInput,
   type RetryWorkflowStepInput,
@@ -20,6 +21,7 @@ import {
   type SaveWorkflowGraphInput,
   type StartWorkflowRunInput,
   type WorkflowRunsInput,
+  type WorkflowTriggerInput,
 } from "@openbot/contracts/ipc";
 import { requireString } from "./validation";
 
@@ -86,4 +88,9 @@ export function parseWorkflowRuns(value: unknown): WorkflowRunsInput {
     limit: value.limit,
     ...(value.before === undefined ? {} : { before: value.before }),
   };
+}
+
+export function parseWorkflowTrigger(value: unknown): WorkflowTriggerInput {
+  if (!isWorkflowTriggerInput(value)) throw new Error("Invalid workflow trigger.");
+  return { workflowId: value.workflowId, nodeId: value.nodeId };
 }

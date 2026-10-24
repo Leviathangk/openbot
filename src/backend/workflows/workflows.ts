@@ -11,11 +11,18 @@
  * whenever the agent service says a turn or a queue changed, after each user action, and at
  * startup. Passes run one at a time; a request during a pass runs one more after it.
  *
+ * An output to a messaging place posts in a fiber of its own, too. Its post is kept before it is
+ * sent and marked on its way before the post starts, as a routine result is. A post that fails is
+ * not sent again by itself: a long text goes in more than one post, so part of it can be in the
+ * place. The user retries the step.
+ *
  * A restart keeps approvals and agent steps: their state is in the database and in the mailbox. A
- * model step lives in this process only, so the first pass after a restart fails it.
+ * model step lives in this process only, so the first pass after a restart fails it. A post that
+ * did not start is sent then; one that was on its way fails as uncertain.
  */
 
 import { isAgentProvider } from "@openbot/contracts/agent-providers";
+import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import {
   type AgentEvent,
   type AgentReasoningEffort,
@@ -32,8 +39,10 @@ import {
   type WorkflowDetail,
   type WorkflowGraph,
   type WorkflowNode,
+  type WorkflowRun,
   type WorkflowRunDetail,
   type WorkflowRunPage,
+  type WorkflowRunSource,
   type WorkflowRunsInput,
   type WorkflowSaveResult,
   type WorkflowStep,
@@ -42,19 +51,23 @@ import {
 } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 import { createOpenBotLogger } from "@openbot/logging";
-import { Context, Effect, Exit, Fiber, Layer, ManagedRuntime, Result, Schema, Scope, Semaphore } from "effect";
+import { Cause, Context, Effect, Exit, Fiber, Layer, ManagedRuntime, Result, Schema, Scope, Semaphore } from "effect";
 import { isNoUpdateAnswer } from "../agent/routine-quiet-runs";
 import type { AgentProvider } from "../agent-client";
+import type { MessagingPostFailure } from "../messaging/messaging-threads";
+import type { ReceivedWebhookEvent } from "../routine-store";
 import {
   isOpenStep,
   publicRun,
   publicStep,
   type StoredWorkflowRun,
   type StoredWorkflowStep,
+  type WorkflowOutputDelivery,
   type WorkflowRunStore,
   type WorkflowStepEnd,
 } from "./workflow-run-store";
 import { type WorkflowStore, WorkflowStoreError } from "./workflow-store";
+import { prepareWorkflowSchedules, type ScheduledWorkflowStart, workflowWebhookPayload } from "./workflow-triggers";
 import {
   agentStepText,
   conditionAnswer,
@@ -96,6 +109,14 @@ export interface WorkflowTextRequest {
   prompt: string;
 }
 
+/** How a run began, and the key that makes a second start of the same run answer the first. */
+interface RunOrigin {
+  source: WorkflowRunSource;
+  scheduledFor: string | null;
+  idempotencyKey: string;
+  payload: string | null;
+}
+
 export interface WorkflowsDependencies {
   store: WorkflowStore;
   runs: WorkflowRunStore;
@@ -113,10 +134,35 @@ export interface WorkflowsDependencies {
   /** One tool-less generation; the failure is a message the user can read. */
   generateText(request: WorkflowTextRequest): Effect.Effect<string, { readonly message: string }>;
   notify(notice: WorkflowNotice): void;
+  /** Whether a messaging connection of this host is on. */
+  connectionOn(connectionId: string): boolean;
+  /** Posts Markdown to a place of a messaging connection, in more than one post when it is long. */
+  post(
+    connectionId: string,
+    placeId: string,
+    markdown: string,
+  ): Effect.Effect<{ posted: true } | { failure: MessagingPostFailure }>;
   /** The workflow whose graph, title, versions or runs changed. */
   changed(workflowId: string): void;
+  /** The zone of a schedule trigger that names none: the server timezone. */
+  timezone(): string;
   now?: () => Date;
 }
+
+/** One verified request to a webhook trigger of a workflow. */
+export interface WorkflowWebhookDelivery {
+  workflowId: string;
+  nodeId: string;
+  event: ReceivedWebhookEvent;
+}
+
+/** What a webhook trigger did with a request. A busy workflow skips it, as a schedule does. */
+export type WorkflowWebhookResult =
+  | { kind: "started"; run: WorkflowRun }
+  | { kind: "ignored"; reason: "busy" }
+  | { kind: "duplicate" }
+  | { kind: "gone" }
+  | { kind: "too-large" };
 
 export interface WorkflowsShape {
   list(): Effect.Effect<WorkflowSummary[], WorkflowFailed>;
@@ -127,8 +173,14 @@ export interface WorkflowsShape {
   saveGraph(input: SaveWorkflowGraphInput): Effect.Effect<WorkflowSaveResult, WorkflowFailed>;
   versions(workflowId: string): Effect.Effect<WorkflowVersion[], WorkflowFailed>;
   restoreVersion(input: RestoreWorkflowVersionInput): Effect.Effect<WorkflowDetail, WorkflowFailed>;
+  /** The graph that a restore of the version would put back, or null when there is no such version. */
+  versionGraph(input: RestoreWorkflowVersionInput): Effect.Effect<WorkflowGraph | null, WorkflowFailed>;
   /** Starts a run of the whole workflow, from a trigger, or from one node. Idempotent by request id. */
   startRun(input: StartWorkflowRunInput): Effect.Effect<WorkflowRunDetail, WorkflowFailed>;
+  /** Starts the run of a schedule trigger's occurrence; see `workflow-triggers.ts`. */
+  startScheduled(start: ScheduledWorkflowStart): Effect.Effect<void, WorkflowFailed>;
+  /** Starts the run of a verified webhook request. The same delivery again starts nothing. */
+  receiveWebhook(delivery: WorkflowWebhookDelivery): Effect.Effect<WorkflowWebhookResult, WorkflowFailed>;
   /** Runs one node alone, with the newest answers of the nodes before it. */
   runStep(input: RunWorkflowStepInput): Effect.Effect<WorkflowStep, WorkflowFailed>;
   stopStep(stepId: string): Effect.Effect<void, WorkflowFailed>;
@@ -138,12 +190,14 @@ export interface WorkflowsShape {
   decide(input: DecideWorkflowStepInput): Effect.Effect<void, WorkflowFailed>;
   runs(input: WorkflowRunsInput): Effect.Effect<WorkflowRunPage, WorkflowFailed>;
   run(runId: string): Effect.Effect<WorkflowRunDetail, WorkflowFailed>;
+  /** The workflow of a run or a step, or null when there is no such run or step. */
+  workflowOf(ref: { runId: string } | { stepId: string }): Effect.Effect<string | null, WorkflowFailed>;
   /** Moves every run that can move now. */
   sweep(): Effect.Effect<void>;
   /** Asks for a sweep when an agent event may have ended a step. Returns at once. */
   notice(event: AgentEvent): Effect.Effect<void>;
-  /** Whether a model step is generating now. A restart would fail it. */
-  generating(): boolean;
+  /** Whether a model step generates or a post is on its way now. A restart would cut it off. */
+  working(): boolean;
 }
 
 class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/backend/Workflows") {
@@ -157,8 +211,8 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         const generationLock = yield* Semaphore.make(1);
         const { store, runs, changed } = dependencies;
         const now = () => (dependencies.now ?? (() => new Date()))();
-        /** The model steps generating, by step. */
-        const generations = new Map<string, Fiber.Fiber<void>>();
+        /** The model steps that generate and the posts on their way, by step. */
+        const working = new Map<string, Fiber.Fiber<void>>();
         let sweeping = false;
         let again = false;
 
@@ -273,12 +327,95 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             yield* requestSweep();
           }).pipe(
             // The step ends before the fiber is forgotten, so a pass never sees it running without one.
-            Effect.ensuring(Effect.sync(() => generations.delete(step.id))),
+            Effect.ensuring(Effect.sync(() => working.delete(step.id))),
           );
           return Effect.forkIn(generate, scope).pipe(
-            Effect.tap((fiber) => Effect.sync(() => generations.set(step.id, fiber))),
+            Effect.tap((fiber) => Effect.sync(() => working.set(step.id, fiber))),
             Effect.asVoid,
           );
+        };
+
+        /** Posts an output step's text to its place in a fiber of its own; the pass does not wait for it. */
+        const startPost = (step: StoredWorkflowStep, output: WorkflowOutputDelivery): Effect.Effect<void> => {
+          const post = Effect.gen(function* () {
+            if (!runs.claimOutput(step.id, now())) return;
+            const result = yield* dependencies.post(output.connectionId, output.placeId, output.text).pipe(
+              // A stop or a defect during the post can leave it in part: the row says so, and does not stay `sending`.
+              Effect.onExit((exit) =>
+                Exit.isSuccess(exit)
+                  ? Effect.void
+                  : Effect.gen(function* () {
+                      runs.endOutput(step.id, "uncertain", "interrupted", now());
+                      // A stop settles its own step, and a restart leaves it to the first pass.
+                      if (Cause.hasInterruptsOnly(exit.cause)) return;
+                      settle(step, { status: "failed", error: outputError("uncertain") });
+                      yield* requestSweep();
+                    }),
+              ),
+            );
+            if ("posted" in result) {
+              runs.endOutput(step.id, "sent", null, now());
+              settle(step, { status: "done", output: step.input });
+            } else {
+              logger.warn("A workflow output was not posted.", { stepId: step.id, failure: result.failure });
+              runs.endOutput(step.id, result.failure === "unknown" ? "uncertain" : "failed", result.failure, now());
+              settle(step, { status: "failed", error: outputError(result.failure) });
+            }
+            yield* requestSweep();
+          }).pipe(Effect.ensuring(Effect.sync(() => working.delete(step.id))));
+          return Effect.forkIn(post, scope).pipe(
+            Effect.tap((fiber) => Effect.sync(() => working.set(step.id, fiber))),
+            Effect.asVoid,
+          );
+        };
+
+        /** Keeps the post of an output to a messaging place, then sends it. */
+        const sendOutput = (step: StoredWorkflowStep, node: WorkflowNode): Effect.Effect<void> => {
+          const connectionId = fieldText(node, "connectionId");
+          const placeId = fieldText(node, "placeId");
+          if (!connectionId || !placeId) {
+            settle(step, { status: "failed", error: sourceText("error.workflow.outputPlaceMissing") });
+            return Effect.void;
+          }
+          // Nothing to say: the place gets no post, as for a quiet routine run.
+          if (!step.input.trim()) {
+            settle(step, { status: "done", output: "" });
+            return Effect.void;
+          }
+          if (!dependencies.connectionOn(connectionId)) {
+            settle(step, { status: "failed", error: outputError("gone") });
+            return Effect.void;
+          }
+          runs.addOutput(
+            { stepId: step.id, connectionId, placeId, text: outputText(titleOf(step.workflowId), step.input) },
+            now(),
+          );
+          const output = runs.output(step.id);
+          return output ? startPost(step, output) : Effect.void;
+        };
+
+        /**
+         * Ends an output step whose post has no fiber, after a restart: a post that did not start is
+         * sent now, and one that was on its way may be in the place in part. Answers whether it ended.
+         */
+        const resumeOutput = (step: StoredWorkflowStep): Effect.Effect<boolean> => {
+          const output = runs.output(step.id);
+          // The restart came between the step and its post: nothing was sent.
+          if (!output)
+            return Effect.succeed(settle(step, { status: "failed", error: sourceText("error.workflow.interrupted") }));
+          switch (output.status) {
+            case "pending":
+              return startPost(step, output).pipe(Effect.as(false));
+            case "sent":
+              return Effect.succeed(settle(step, { status: "done", output: step.input }));
+            case "failed":
+              return Effect.succeed(settle(step, { status: "failed", error: outputError(output.reason) }));
+            case "sending":
+              runs.endOutput(step.id, "uncertain", "restart", now());
+              return Effect.succeed(settle(step, { status: "failed", error: outputError("uncertain") }));
+            case "uncertain":
+              return Effect.succeed(settle(step, { status: "failed", error: outputError("uncertain") }));
+          }
         };
 
         /** Does what a new running step of `node` does. */
@@ -318,7 +455,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
               return;
             case "output":
               if (fieldText(node, "target") === "channel") {
-                settle(step, { status: "failed", error: sourceText("error.workflow.outputPending") });
+                yield* sendOutput(step, node);
                 return;
               }
               dependencies.notify({
@@ -353,11 +490,11 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 ),
               ),
             );
-          const fiber = generations.get(step.id);
+          const fiber = working.get(step.id);
           if (fiber) yield* Fiber.interrupt(fiber);
           settle(step, { status: "stopped" });
           // A fiber interrupted before it starts never runs its own clean-up.
-          generations.delete(step.id);
+          working.delete(step.id);
         });
 
         // --- Runs ----------------------------------------------------------------------------------
@@ -442,8 +579,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 yield* sendAgentStep(step);
                 ended = runs.step(step.id)?.status !== "running";
               } else ended = settleFromDelivery(step);
-            } else if ((step.kind === "llm" || step.kind === "condition") && !generations.has(step.id)) {
+            } else if ((step.kind === "llm" || step.kind === "condition") && !working.has(step.id)) {
               ended = settle(step, { status: "failed", error: sourceText("error.workflow.interrupted") });
+            } else if (step.kind === "output" && !working.has(step.id)) {
+              ended = yield* resumeOutput(step);
             }
             if (ended && step.runId) runIds.add(step.runId);
           }
@@ -499,7 +638,14 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         });
 
         const create = Effect.fn("Workflows.create")(function* (input: CreateWorkflowInput) {
-          const detail = yield* attempt(() => store.create(input, now()));
+          const detail = yield* attempt(() =>
+            store.create(
+              input.graph
+                ? { ...input, graph: prepareWorkflowSchedules(input.graph, dependencies.timezone(), now()) }
+                : input,
+              now(),
+            ),
+          );
           changed(detail.summary.id);
           return detail;
         });
@@ -524,7 +670,12 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         const saveGraph = Effect.fn("Workflows.saveGraph")(function* (input: SaveWorkflowGraphInput) {
           const result = yield* attempt(() =>
-            store.saveGraph(input.workflowId, input.baseRevision, input.graph, now()),
+            store.saveGraph(
+              input.workflowId,
+              input.baseRevision,
+              prepareWorkflowSchedules(input.graph, dependencies.timezone(), now()),
+              now(),
+            ),
           );
           // A conflict changed nothing: the editor that saved gets the newer workflow in the answer.
           if (result.ok) changed(input.workflowId);
@@ -546,64 +697,121 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         // --- Run actions ---------------------------------------------------------------------------
 
+        /** Starts a run from a node, or from the start of the graph. Call it under the lock. */
+        const begin = Effect.fn("Workflows.begin")(function* (
+          detail: WorkflowDetail,
+          from: WorkflowNode | null,
+          origin: RunOrigin,
+        ) {
+          const start = {
+            triggerNodeId: from?.kind === "trigger" ? from.id : null,
+            fromNodeId: from && from.kind !== "trigger" ? from.id : null,
+          };
+          const workflowId = detail.summary.id;
+          const answered = runs.latestDone(workflowId);
+          const scope = runScope(detail.graph, start, new Set(answered.keys()));
+          if (detail.graph.nodes.some((node) => scope.nodes.has(node.id) && unsupportedNode(node)))
+            return yield* refuse(sourceText("error.workflow.nodeUnsupported"));
+          const { run, created } = yield* attempt(() =>
+            runs.startRun({ workflowId, ...start, ...origin, revision: detail.revision, graph: detail.graph }, now()),
+          );
+          if (created) {
+            yield* attempt(() => {
+              store.addRunVersion(workflowId, detail.revision, detail.graph, now());
+              // The nodes before the start give their earlier answers again.
+              for (const nodeId of scope.reused) {
+                const earlier = answered.get(nodeId);
+                if (!earlier) continue;
+                runs.addStep(
+                  {
+                    workflowId: run.workflowId,
+                    runId: run.id,
+                    nodeId,
+                    kind: earlier.kind,
+                    requestId: `${run.id}:${nodeId}:reused`,
+                    agentId: earlier.agentId,
+                    status: "done",
+                    input: earlier.input,
+                    output: earlier.output,
+                    branch: earlier.branch,
+                  },
+                  now(),
+                );
+              }
+            });
+            changed(workflowId);
+            yield* advance(run.id);
+          }
+          return runs.run(run.id) ?? run;
+        });
+
         const startRun = Effect.fn("Workflows.startRun")(function* (input: StartWorkflowRunInput) {
           return yield* locked(
             Effect.gen(function* () {
               const detail = yield* attempt(() => detailOf(input.workflowId));
               const from = input.fromNodeId ? detail.graph.nodes.find((node) => node.id === input.fromNodeId) : null;
               if (from === undefined) return yield* refuse(sourceText("error.workflow.nodeMissing"));
-              const start = {
-                triggerNodeId: from?.kind === "trigger" ? from.id : null,
-                fromNodeId: from && from.kind !== "trigger" ? from.id : null,
-              };
-              const answered = runs.latestDone(input.workflowId);
-              const scope = runScope(detail.graph, start, new Set(answered.keys()));
-              if (detail.graph.nodes.some((node) => scope.nodes.has(node.id) && unsupportedNode(node)))
-                return yield* refuse(sourceText("error.workflow.nodeUnsupported"));
-              const { run, created } = yield* attempt(() =>
-                runs.startRun(
-                  {
-                    workflowId: input.workflowId,
-                    ...start,
-                    source: "manual",
-                    scheduledFor: null,
-                    idempotencyKey: `manual:${input.requestId}`,
-                    revision: detail.revision,
-                    graph: detail.graph,
-                    payload: null,
-                  },
-                  now(),
-                ),
-              );
-              if (created) {
-                yield* attempt(() => {
-                  store.addRunVersion(input.workflowId, detail.revision, detail.graph, now());
-                  // The nodes before the start give their earlier answers again.
-                  for (const nodeId of scope.reused) {
-                    const earlier = answered.get(nodeId);
-                    if (!earlier) continue;
-                    runs.addStep(
-                      {
-                        workflowId: run.workflowId,
-                        runId: run.id,
-                        nodeId,
-                        kind: earlier.kind,
-                        requestId: `${run.id}:${nodeId}:reused`,
-                        agentId: earlier.agentId,
-                        status: "done",
-                        input: earlier.input,
-                        output: earlier.output,
-                        branch: earlier.branch,
-                      },
-                      now(),
-                    );
-                  }
-                });
-                changed(input.workflowId);
-                yield* advance(run.id);
+              const run = yield* begin(detail, from, {
+                source: "manual",
+                scheduledFor: null,
+                idempotencyKey: `manual:${input.requestId}`,
+                payload: null,
+              });
+              return runDetail(run);
+            }),
+          );
+        });
+
+        /**
+         * Starts the run of one occurrence of a schedule trigger. A workflow that still runs skips the
+         * occurrence, so a slow workflow on a short schedule does not pile up runs.
+         */
+        const startScheduled = Effect.fn("Workflows.startScheduled")(function* (input: ScheduledWorkflowStart) {
+          yield* locked(
+            Effect.gen(function* () {
+              const detail = store.detail(input.workflowId);
+              const trigger = detail?.graph.nodes.find((node) => node.id === input.nodeId);
+              if (!detail || trigger?.kind !== "trigger" || trigger.fields.trigger !== "schedule") return;
+              if (runs.openRuns().some((run) => run.workflowId === input.workflowId)) return;
+              yield* begin(detail, trigger, {
+                source: "schedule",
+                scheduledFor: input.scheduledFor,
+                idempotencyKey: `workflow:${input.nodeId}:${input.scheduledFor}`,
+                payload: null,
+              });
+            }),
+          );
+        });
+
+        const receiveWebhook = Effect.fn("Workflows.receiveWebhook")(function* (input: WorkflowWebhookDelivery) {
+          return yield* locked(
+            Effect.gen(function* (): Effect.fn.Return<WorkflowWebhookResult, WorkflowFailed> {
+              const { workflowId, nodeId, event } = input;
+              const detail = yield* attempt(() => store.detail(workflowId));
+              const trigger = detail?.graph.nodes.find((node) => node.id === nodeId);
+              if (!detail || trigger?.kind !== "trigger" || trigger.fields.trigger !== "webhook")
+                return { kind: "gone" };
+              const receipt = { workflowId, nodeId, deliveryId: event.deliveryId, receivedAt: event.receivedAt };
+              if (yield* attempt(() => runs.hasWebhookReceipt(receipt))) return { kind: "duplicate" };
+              const payload = workflowWebhookPayload(nodeId, event);
+              // No receipt, so the sender can send a smaller body with the same delivery ID.
+              if (payload.length > INPUT_LIMITS.workflowWebhookPayload) return { kind: "too-large" };
+              if (runs.openRuns().some((run) => run.workflowId === workflowId)) {
+                yield* attempt(() =>
+                  runs.addWebhookReceipt({ ...receipt, status: "ignored", reason: "busy", runId: null }),
+                );
+                return { kind: "ignored", reason: "busy" };
               }
-              const current = runs.run(run.id);
-              return runDetail(current ?? run);
+              const run = yield* begin(detail, trigger, {
+                source: "webhook",
+                scheduledFor: null,
+                idempotencyKey: `webhook:${nodeId}:${event.deliveryId}`,
+                payload,
+              });
+              yield* attempt(() =>
+                runs.addWebhookReceipt({ ...receipt, status: "started", reason: null, runId: run.id }),
+              );
+              return { kind: "started", run: publicRun(run) };
             }),
           );
         });
@@ -632,7 +840,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 ),
               );
               changed(input.workflowId);
-              if (step.status === "running" && !step.deliveryId && !generations.has(step.id))
+              if (step.status === "running" && !step.deliveryId && !working.has(step.id))
                 yield* execute(step, node, null);
               return publicStep(runs.step(step.id) ?? step);
             }),
@@ -697,7 +905,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 ),
               );
               changed(failed.workflowId);
-              if (step.status === "running" && !step.deliveryId && !generations.has(step.id))
+              if (step.status === "running" && !step.deliveryId && !working.has(step.id))
                 yield* execute(step, node, run);
               if (run) yield* advance(run.id);
               return publicStep(runs.step(step.id) ?? step);
@@ -734,6 +942,16 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           return yield* attempt(() => runDetail(found));
         });
 
+        const versionGraph = Effect.fn("Workflows.versionGraph")(function* (input: RestoreWorkflowVersionInput) {
+          return yield* attempt(() => store.versionGraph(input.workflowId, input.versionId));
+        });
+
+        const workflowOf = Effect.fn("Workflows.workflowOf")(function* (ref: { runId: string } | { stepId: string }) {
+          return yield* attempt(
+            () => ("runId" in ref ? runs.run(ref.runId) : runs.step(ref.stepId))?.workflowId ?? null,
+          );
+        });
+
         return Workflows.of({
           list,
           get,
@@ -743,7 +961,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           saveGraph,
           versions,
           restoreVersion,
+          versionGraph,
           startRun,
+          startScheduled,
+          receiveWebhook,
           runStep,
           stopStep,
           stopRun,
@@ -751,9 +972,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           decide,
           runs: runPage,
           run,
+          workflowOf,
           sweep,
           notice,
-          generating: () => generations.size > 0,
+          working: () => working.size > 0,
         });
       }),
     );
@@ -764,7 +986,7 @@ export interface WorkflowsHandle extends WorkflowsShape {
   close(): Effect.Effect<void>;
 }
 
-/** Starts the service on its own runtime; `close` stops the passes and generations it forked. */
+/** Starts the service on its own runtime; `close` stops the passes, generations and posts it forked. */
 export const createWorkflows = Effect.fn("createWorkflows")(function* (dependencies: WorkflowsDependencies) {
   const runtime = ManagedRuntime.make(Workflows.layer(dependencies));
   const context = yield* runtime.contextEffect.pipe(
@@ -773,3 +995,22 @@ export const createWorkflows = Effect.fn("createWorkflows")(function* (dependenc
   const service = Context.get(context, Workflows);
   return { ...service, close: () => runtime.disposeEffect } satisfies WorkflowsHandle;
 });
+
+/** What the place gets: the workflow's name over the text. Both are the user's and the agents' own. */
+function outputText(workflowTitle: string, text: string): string {
+  return workflowTitle ? `**${workflowTitle}**\n\n${text}` : text;
+}
+
+/** The sentence for a post that did not end as sent, from its failure or its kept reason. */
+function outputError(reason: string | null): string {
+  switch (reason) {
+    case "not-running":
+      return sourceText("error.workflow.outputNotRunning");
+    case "gone":
+      return sourceText("error.workflow.outputConnectionOff");
+    case "refused":
+      return sourceText("error.workflow.outputRefused");
+    default:
+      return sourceText("error.workflow.outputUncertain");
+  }
+}

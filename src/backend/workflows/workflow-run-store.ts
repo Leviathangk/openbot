@@ -54,6 +54,35 @@ export function isOpenStep(step: Pick<WorkflowStep, "status">): boolean {
   return isOneOf(OPEN_STEP_STATUSES, step.status);
 }
 const OPEN_RUN_STATUSES = ["running", "approval", "stopping"] as const satisfies readonly WorkflowRunStatus[];
+/** How long a received delivery ID counts, like the receipts of routine webhooks. */
+const WEBHOOK_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** One delivery that a webhook trigger received: the run it started, or why it started none. */
+export interface WorkflowWebhookReceipt {
+  workflowId: string;
+  nodeId: string;
+  deliveryId: string;
+  status: "started" | "ignored";
+  reason: "inactive" | "busy" | null;
+  runId: string | null;
+  receivedAt: string;
+}
+
+const OUTPUT_STATUSES = ["pending", "sending", "sent", "failed", "uncertain"] as const;
+export type WorkflowOutputEnd = Exclude<(typeof OUTPUT_STATUSES)[number], "pending" | "sending">;
+
+/**
+ * The post of an output step to a messaging place. `sending` is set before the post starts, so a
+ * post that a stop or a crash cut off becomes `uncertain`: part of it can be in the place.
+ */
+export interface WorkflowOutputDelivery {
+  stepId: string;
+  connectionId: string;
+  placeId: string;
+  text: string;
+  status: (typeof OUTPUT_STATUSES)[number];
+  reason: string | null;
+}
 
 export interface NewWorkflowRun {
   workflowId: string;
@@ -140,6 +169,44 @@ export class WorkflowRunStore {
       const run = this.run(runId);
       if (!run) throw new Error("A new workflow run was not stored.");
       return { run, created: true };
+    });
+  }
+
+  /** Whether the trigger received this delivery before, inside the retention window. */
+  hasWebhookReceipt(receipt: Pick<WorkflowWebhookReceipt, "workflowId" | "nodeId" | "deliveryId" | "receivedAt">) {
+    return (
+      databaseRow(
+        this.#database.connection
+          .prepare(
+            `SELECT 1 AS found FROM workflow_webhook_receipts
+             WHERE workflow_id = ? AND node_id = ? AND delivery_id = ? AND received_at >= ?`,
+          )
+          .get(receipt.workflowId, receipt.nodeId, receipt.deliveryId, receiptCutoff(receipt.receivedAt)),
+      ) !== null
+    );
+  }
+
+  /** Records one received delivery and drops the receipts past retention. */
+  addWebhookReceipt(receipt: WorkflowWebhookReceipt): void {
+    this.#transaction(() => {
+      const db = this.#database.connection;
+      db.prepare("DELETE FROM workflow_webhook_receipts WHERE received_at < ?").run(receiptCutoff(receipt.receivedAt));
+      db.prepare(
+        `INSERT INTO workflow_webhook_receipts (receipt_id, workflow_id, node_id, delivery_id, status, reason, run_id,
+           received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(workflow_id, node_id, delivery_id) DO UPDATE SET status = excluded.status,
+           reason = excluded.reason, run_id = excluded.run_id, received_at = excluded.received_at`,
+      ).run(
+        this.#createId(),
+        receipt.workflowId,
+        receipt.nodeId,
+        receipt.deliveryId,
+        receipt.status,
+        receipt.reason,
+        receipt.runId,
+        receipt.receivedAt,
+      );
     });
   }
 
@@ -325,6 +392,48 @@ export class WorkflowRunStore {
     );
   }
 
+  /** Keeps the post of an output step before it is sent. A second call for the step keeps the first. */
+  addOutput(output: Pick<WorkflowOutputDelivery, "stepId" | "connectionId" | "placeId" | "text">, now = new Date()) {
+    const at = now.toISOString();
+    this.#database.connection
+      .prepare(
+        `INSERT OR IGNORE INTO workflow_output_deliveries
+           (step_id, connection_id, place_id, text, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(output.stepId, output.connectionId, output.placeId, output.text, at, at);
+  }
+
+  output(stepId: string): WorkflowOutputDelivery | null {
+    const row = databaseRow(
+      this.#database.connection.prepare("SELECT * FROM workflow_output_deliveries WHERE step_id = ?").get(stepId),
+    );
+    return row ? toOutput(row) : null;
+  }
+
+  /** Marks a waiting post as on its way, before it starts. False when it does not wait now. */
+  claimOutput(stepId: string, now = new Date()): boolean {
+    return (
+      this.#database.connection
+        .prepare(
+          `UPDATE workflow_output_deliveries SET status = 'sending', attempts = attempts + 1, updated_at = ?
+           WHERE step_id = ? AND status = 'pending'`,
+        )
+        .run(now.toISOString(), stepId).changes > 0
+    );
+  }
+
+  /** Ends a post that waits or is on its way. */
+  endOutput(stepId: string, status: WorkflowOutputEnd, reason: string | null, now = new Date()): void {
+    const at = now.toISOString();
+    this.#database.connection
+      .prepare(
+        `UPDATE workflow_output_deliveries SET status = ?, reason = ?, sent_at = ?, updated_at = ?
+         WHERE step_id = ? AND status IN ('pending', 'sending')`,
+      )
+      .run(status, reason, status === "sent" ? at : null, at, stepId);
+  }
+
   /** Runs newest first, before `before` when given, and on the first page the newest steps alone. */
   page(workflowId: string, before: string | undefined, limit: number): WorkflowRunPage {
     const db = this.#database.connection;
@@ -466,4 +575,20 @@ function toStep(row: DynamicRecord): StoredWorkflowStep {
     endedAt: optionalStringColumn(row, "ended_at"),
     createdAt: requiredStringColumn(row, "created_at"),
   };
+}
+
+function toOutput(row: DynamicRecord): WorkflowOutputDelivery {
+  return {
+    stepId: requiredStringColumn(row, "step_id"),
+    connectionId: requiredStringColumn(row, "connection_id"),
+    placeId: requiredStringColumn(row, "place_id"),
+    text: requiredStringColumn(row, "text"),
+    // The CHECK constraint holds the column to these values.
+    status: isOneOf(OUTPUT_STATUSES, row.status) ? row.status : "uncertain",
+    reason: optionalStringColumn(row, "reason"),
+  };
+}
+
+function receiptCutoff(receivedAt: string): string {
+  return new Date(Date.parse(receivedAt) - WEBHOOK_RECEIPT_RETENTION_MS).toISOString();
 }

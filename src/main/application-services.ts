@@ -17,6 +17,7 @@ import { RoutineResultStore } from "../backend/routine-results/routine-result-st
 import { createRoutineResults, type RoutineResultsHandle } from "../backend/routine-results/routine-results";
 import { WorkflowRunStore } from "../backend/workflows/workflow-run-store";
 import { WorkflowStore } from "../backend/workflows/workflow-store";
+import { WorkflowTriggers, workflowScheduleDueAt } from "../backend/workflows/workflow-triggers";
 import { createWorkflows, type WorkflowNotice, type WorkflowsHandle } from "../backend/workflows/workflows";
 import { type AcpRegistry, createAcpRegistry } from "./acp-registry";
 import { type AgentAdminSettingsService, createAgentAdminSettings } from "./agent-admin-settings";
@@ -1556,6 +1557,8 @@ export async function createApplicationServices({
   // Outside every workspace. Each saved key is masked in the logs before the first agent starts.
   const agentApiKeys = new AgentApiKeys(join(app.getPath("userData"), "agent-api-keys"));
   await Effect.runPromise(agentApiKeys.registerSaved());
+  // The schedule triggers of workflows share the routine timer; built after the workflows below.
+  let workflowTriggers: WorkflowTriggers | null = null;
   const service: AgentService = new AgentService({
     store,
     mailbox,
@@ -1662,6 +1665,8 @@ export async function createApplicationServices({
     busyMessageMode: () => busyMessageMode.get().mode,
     agentMemoryLimit: () => agentMemoryLimit.get().limit,
     timezone: () => serverTimezone.effective(),
+    // `workflowTriggers` is built later, after the workflows.
+    extraRoutineSources: () => (workflowTriggers ? [workflowTriggers] : []),
     // `host` is built later, after the agent service; a channel tool reads it when it runs.
     channelPersonAgentLevel: (personId, agentId) => host.channelPersonAgentLevel(personId, agentId),
     channelRemotePerson: (personId) => host.channelPersonIsRemote(personId),
@@ -1717,9 +1722,13 @@ export async function createApplicationServices({
   );
   teardown.push(TEARDOWN_ORDER.routineFlows, "the routine flows", () => Effect.runPromise(routineFlowRuntime.close()));
   // Graphs of steps drawn on a canvas; see `workflows.ts`.
+  const workflowStore = new WorkflowStore({
+    database: store.database,
+    nextDueAt: workflowScheduleDueAt(() => serverTimezone.effective()),
+  });
   const workflowRuntime = await Effect.runPromise(
     createWorkflows({
-      store: new WorkflowStore({ database: store.database }),
+      store: workflowStore,
       runs: new WorkflowRunStore({ database: store.database }),
       delivery: (deliveryId) => {
         const found = mailbox.getDelivery(deliveryId)?.delivery;
@@ -1742,10 +1751,24 @@ export async function createApplicationServices({
           })),
         ),
       notify: forwardWorkflowNotice,
-      // An agent event, so this window, joined clients and the web app hear it the same way.
-      changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
+      connectionOn: (connectionId) => service.messaging.store.connection(connectionId)?.enabled === true,
+      post: (connectionId, placeId, markdown) => service.messaging.deliver(connectionId, placeId, markdown),
+      // An agent event, so this window, joined clients and the web app hear it the same way. A save
+      // can move a schedule trigger, so the routine timer plans again.
+      changed: (workflowId) => {
+        service.notifyWorkflowsChanged(workflowId);
+        service.armRoutines();
+      },
+      timezone: () => serverTimezone.effective(),
     }),
   );
+  workflowTriggers = new WorkflowTriggers({
+    store: workflowStore,
+    timezone: () => serverTimezone.effective(),
+    start: (start) => workflowRuntime.startScheduled(start),
+    changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
+  });
+  service.armRoutines();
   teardown.push(TEARDOWN_ORDER.workflows, "the workflows", () => Effect.runPromise(workflowRuntime.close()));
   // An agent routine's answer sent on to a messaging place; see `routine-results.ts`.
   const routineResultRuntime = await Effect.runPromise(
@@ -1954,6 +1977,10 @@ export async function createApplicationServices({
   });
   const events = new HostEventsService({
     routines: service.routineRecords,
+    workflows: {
+      receive: (delivery) => workflowRuntime.receiveWebhook(delivery),
+      changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
+    },
     cipher: secretCipher,
     relay: webhookRelay,
     accountPrincipal: () => {
@@ -2190,6 +2217,8 @@ export async function createApplicationServices({
     instanceTransfer,
     // Present, so the host advertises `routine-flows-v1`. Any member who can see the agents.
     routineFlows: routineFlowRuntime,
+    // Present, so the host advertises `workflows-v1`. Any member who can see and talk to the agents.
+    workflows: { ...workflowRuntime, rotateWorkflowSecret: (input) => events.rotateWorkflowSecret(input) },
     // Present, so the host advertises `agent-hidden-v1`. Any member can hide or restore an agent that they can see.
     hiddenAgents: service,
     // Present, so the host advertises `agent-access-v1`. Only owners and admins change the roles.
@@ -2712,7 +2741,7 @@ export async function createApplicationServices({
   const describeRestartReadiness = (): RestartReadiness =>
     checkRestartReadiness({
       // A workflow model step lives in this process only; agent steps are queued deliveries.
-      agentWork: [...service.hasActiveWork(), ...(workflowRuntime.generating() ? ["routine-run"] : [])],
+      agentWork: [...service.hasActiveWork(), ...(workflowRuntime.working() ? ["routine-run"] : [])],
       hostBlockers: host.describeRestartBlockers(),
       activeBrowserControls: browser.getControlState().sessions.length,
       activeFileTransfers: remoteServers.hasActiveTransfers(),

@@ -499,7 +499,9 @@ import type {
   WorkflowSaveResult,
   WorkflowStep,
   WorkflowSummary,
+  WorkflowTriggerInput,
   WorkflowVersion,
+  WorkflowWebhookSecret,
 } from "./ipc-workflows";
 import type { LicenseCheckoutRequest, LicenseRenewalRequest, LicenseState, LicenseUsersRequest } from "./license";
 import type { AccountSession, MobileConnectedDevice, MobileConnectLink, MobileConnectTicket } from "./mobile-connect";
@@ -1371,7 +1373,8 @@ export const IPC_ENDPOINTS = {
   },
   /**
    * Workflows: graphs of steps drawn on a canvas, their versions and their runs. The agent event
-   * `workflows-changed` says which workflow changed. A joined server does not answer them yet.
+   * `workflows-changed` says which workflow changed. A joined server answers through `workflows-v1`
+   * when it supports it.
    */
   workflows: {
     list: scopedQuery<WorkflowSummary[]>()("workflows:list"),
@@ -1390,6 +1393,10 @@ export const IPC_ENDPOINTS = {
     decide: scopedRequest<DecideWorkflowStepInput, void>()("workflows:decide"),
     runs: scopedRequest<WorkflowRunsInput, WorkflowRunPage>()("workflows:runs"),
     run: scopedRequest<string, WorkflowRunDetail>()("workflows:run"),
+    /** Makes a new signing secret for a webhook trigger; the first one also makes its address. */
+    rotateWebhookSecret: scopedRequest<WorkflowTriggerInput, WorkflowWebhookSecret>()(
+      "workflows:rotate-webhook-secret",
+    ),
   },
   /**
    * Routine results: an agent routine's answer sent on to a messaging place. Only this computer's host

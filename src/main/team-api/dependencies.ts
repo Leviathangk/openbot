@@ -10,6 +10,7 @@ import type { AgentTemplateService } from "../agent-template-service";
 import type { BrowserProfileService } from "../browser-profile-service";
 import type { PeerCustomProviderChanges } from "../custom-provider-changes";
 import type { HostEventsApi } from "../host-events-api";
+import type { HostEventsService } from "../host-events-service";
 import type { HostReleaseService } from "../host-release-service";
 import type { HostService } from "../host-service";
 import type { PromptCacheTtlPreferenceStore } from "../prompt-cache-ttl-preference-store";
@@ -49,6 +50,7 @@ import type { RoutineFlowsHandle } from "../../backend/routine-flows/routine-flo
 import type { SidebarLayoutStore } from "../../backend/sidebar-layout-store";
 import type { StorageUsageService } from "../../backend/storage-usage";
 import type { TeamChatStore } from "../../backend/team-chat-store";
+import type { WorkflowsHandle } from "../../backend/workflows/workflows";
 import type { AgentImportService } from "../agent-import-service";
 import type { BitwardenConnectorService } from "../bitwarden-connector-service";
 import type { BrowserViewGateway } from "../browser-view-gateway";
@@ -256,6 +258,33 @@ export type TeamApiRoutineFlows = Pick<
 >;
 
 /**
+ * Its presence is what `#protocolSupport` advertises `workflows-v1` on. Any member who can see every
+ * agent of a workflow can use it; see `workflows-v1.ts` for the grant.
+ */
+export type TeamApiWorkflows = Pick<
+  WorkflowsHandle,
+  | "list"
+  | "get"
+  | "create"
+  | "rename"
+  | "remove"
+  | "saveGraph"
+  | "versions"
+  | "restoreVersion"
+  | "versionGraph"
+  | "startRun"
+  | "runStep"
+  | "stopStep"
+  | "stopRun"
+  | "retryStep"
+  | "decide"
+  | "runs"
+  | "run"
+  | "workflowOf"
+> &
+  Pick<HostEventsService, "rotateWorkflowSecret">;
+
+/**
  * The admin routes, one member per optional capability. A member's presence is what
  * `#protocolSupport` advertises its capability on; every route behind it requires an owner or admin.
  */
@@ -423,6 +452,7 @@ export interface TeamApiOptions {
   agentImport?: TeamApiAgentImport;
   instanceTransfer?: TeamApiInstanceTransfer;
   routineFlows?: TeamApiRoutineFlows;
+  workflows?: TeamApiWorkflows;
   hiddenAgents?: TeamApiHiddenAgents;
   /** `agent-access-v1`: the roles that limit what a member can do with each agent. */
   agentAccess?: TeamApiAgentAccess;
