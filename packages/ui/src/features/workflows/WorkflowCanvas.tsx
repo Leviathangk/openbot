@@ -934,6 +934,13 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     }
     untrack(() => reset(props.workflow.graph));
   });
+  // The host opens another workflow when a delete is kept, so the canvas shows again. A switch while
+  // the Undo toast is open keeps that delete.
+  const workflowId = createMemo(() => props.workflow.summary.id);
+  createEffect(workflowId, () => {
+    closeDelete?.();
+    setDeleted(false);
+  });
 
   /* --------------------------------------------------------- Switcher */
 

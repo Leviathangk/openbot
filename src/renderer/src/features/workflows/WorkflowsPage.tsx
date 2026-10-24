@@ -9,7 +9,7 @@ import {
 } from "@openbot/ui/features/workflows/workflow-model";
 import { EMPTY_WORKFLOW_RUN_VIEW, type WorkflowRunView } from "@openbot/ui/features/workflows/workflow-run-view";
 import { useText } from "@openbot/ui/text";
-import { createSignal, onSettled, Show } from "solid-js";
+import { createSignal, onSettled, Show, untrack } from "solid-js";
 import { useAuth } from "../account/account-context";
 import { useAgents } from "../agents/agents-context";
 import { serverSupportsCapability } from "../servers/server-capabilities";
@@ -60,7 +60,8 @@ export function WorkflowsPage(props: { serverId: string }) {
 function WorkflowsCanvas(props: { host: WorkflowHost }) {
   const { agentList, modelOptions } = useAgents();
   const { signedInAccount } = useAuth();
-  const workflows = createWorkflowsController(props.host);
+  // The keyed parent mounts a new canvas for each server, so the host does not change.
+  const workflows = createWorkflowsController(untrack(() => props.host));
   const catalogs: WorkflowCatalogs = {
     get agents() {
       return agentList();
@@ -77,20 +78,19 @@ function WorkflowsCanvas(props: { host: WorkflowHost }) {
       return signedInAccount()?.name ?? undefined;
     },
   };
+  // The canvas is a direct child of the window page, which gives it the height of the pane.
   return (
-    <div class="window-page">
-      <Show when={workflows.detail()}>
-        {(workflow) => (
-          <WorkflowCanvas
-            workflow={workflow()}
-            features={WORKFLOW_FEATURES_V1}
-            catalogs={catalogs}
-            frame="window"
-            {...workflows.props}
-          />
-        )}
-      </Show>
-    </div>
+    <Show when={workflows.detail()}>
+      {(workflow) => (
+        <WorkflowCanvas
+          workflow={workflow()}
+          features={WORKFLOW_FEATURES_V1}
+          catalogs={catalogs}
+          frame="window"
+          {...workflows.props}
+        />
+      )}
+    </Show>
   );
 }
 
