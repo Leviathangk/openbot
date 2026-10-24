@@ -121,7 +121,9 @@ export function OutputNode(props: {
           <ChoicePill
             name={t("workflow.output.sendTo")}
             value={target()}
-            choices={TARGETS(t)}
+            choices={TARGETS(t).filter(
+              (choice) => choice.value === target() || (board.features()?.outputs.includes(choice.value) ?? true),
+            )}
             disabled={locked()}
             onChange={setTarget}
           />

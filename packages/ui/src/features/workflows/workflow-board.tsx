@@ -11,7 +11,7 @@ import { createContext, createSignal, createStore, For, onSettled, Show, untrack
 import { useText } from "../../text";
 import { prefersReducedMotion } from "../../utils";
 import { diagramEdgeMidpoint, diagramEdgePath } from "../diagrams/diagram-graph";
-import type { WorkflowCatalogs } from "./workflow-model";
+import type { WorkflowCatalogs, WorkflowFeatures } from "./workflow-model";
 
 export type WfnPortType = "text" | "image" | "file";
 export type WfnPortSide = "in" | "out";
@@ -191,6 +191,8 @@ export interface WfnBoard {
   retry?: ((id: string) => void) | undefined;
   /** The agents, models, places and files that the nodes offer. */
   catalogs: () => WorkflowCatalogs;
+  /** The node kinds, triggers and outputs that the host runs. Without it, the nodes offer all of them. */
+  features: () => WorkflowFeatures | undefined;
   /** Runs the workflow from one trigger. Only the canvas has it; elsewhere a trigger runs by itself. */
   runFrom?: ((id: string) => void) | undefined;
   /**
@@ -284,6 +286,14 @@ export interface BoardOptions {
   edgeTone?: (edge: WfnEdge) => WfnEdgeTone;
   /** The results that the steps have before the story opens. */
   results?: Record<string, readonly WfnResult[]>;
+  /**
+   * The results of each step from the host. With it, the board shows these results, not the ones that
+   * `record` and `recordFailure` add.
+   */
+  resultsOf?: (id: string) => readonly WfnResult[];
+  /** The fields of the nodes when the board opens, such as the fields of a saved graph. */
+  fields?: Record<string, WfnFields> | undefined;
+  features?: () => WorkflowFeatures | undefined;
   duplicate?: (id: string) => void;
   /**
    * A connection dropped on the empty canvas. When it returns true, the line stays drawn to the drop
@@ -415,7 +425,7 @@ export function createBoard(options: BoardOptions) {
     removed: [],
     locked: untrack(() => [...(options.locked ?? [])]),
     edges: untrack(() => [...(options.edges ?? [])]),
-    fields: {},
+    fields: untrack(() => copyFields(options.fields ?? {})),
     pending: null,
     draft: null,
     target: null,
@@ -659,6 +669,8 @@ export function createBoard(options: BoardOptions) {
     });
   };
 
+  const resultsOf = (id: string): readonly WfnResult[] => options.resultsOf?.(id) ?? state.results[id] ?? [];
+
   const board: WfnBoard = {
     selected: () => (state.selection.length === 1 ? (state.selection[0] ?? null) : null),
     isSelected: (id) => state.selection.includes(id),
@@ -693,6 +705,7 @@ export function createBoard(options: BoardOptions) {
     },
     duplicate: options.duplicate,
     catalogs: () => options.catalogs(),
+    features: () => options.features?.(),
     status: (id) => options.status?.(id),
     error: (id) => options.error?.(id),
     retry: options.retry,
@@ -707,9 +720,9 @@ export function createBoard(options: BoardOptions) {
     size: (id) => options.size?.(id),
     stretch: (id) => options.stretch?.(id) ?? "x",
     resetSize: options.resetSize,
-    results: (id) => state.results[id] ?? [],
+    results: (id) => resultsOf(id),
     shown: (id) => {
-      const list = state.results[id] ?? [];
+      const list = resultsOf(id);
       const picked = state.picked[id];
       if (picked) return list.find((result) => result.id === picked);
       const viewing = state.viewing;

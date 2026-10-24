@@ -67,9 +67,9 @@ export function TriggerNode(props: {
   schedule?: string;
   connectionId?: string;
   placeId?: string;
-  webhookUrl?: string;
+  webhookUrl?: string | undefined;
   /** The next run of the schedule, as an ISO time. */
-  nextRun?: string;
+  nextRun?: string | undefined;
 }) {
   const board = useBoard();
   const { t, format } = useText();
@@ -153,7 +153,9 @@ export function TriggerNode(props: {
           <ChoicePill
             name={t("workflow.trigger.title")}
             value={trigger()}
-            choices={TRIGGERS(t)}
+            choices={TRIGGERS(t).filter(
+              (choice) => choice.value === trigger() || (board.features()?.triggers.includes(choice.value) ?? true),
+            )}
             disabled={locked()}
             onChange={setTrigger}
           />
