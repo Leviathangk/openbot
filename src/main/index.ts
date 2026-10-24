@@ -342,6 +342,7 @@ const windowHolder = createMainWindowHolder();
 // Destructured so every `service.on("event", forwardX)` registration below reads as it always has.
 const {
   forwardAgentEvent,
+  forwardWorkflowNotice,
   forwardBrowserDisplayState,
   forwardUpdateStatus,
   forwardUpdatePreference,
@@ -1086,6 +1087,7 @@ if (!hasSingleInstanceLock) {
         forwardVoiceModelStatus,
         forwardVoiceStreamTranscript,
         forwardSpeechModelStatus,
+        forwardWorkflowNotice,
         prepareForUpdateInstall,
         quitting: () => quitStarted,
       });

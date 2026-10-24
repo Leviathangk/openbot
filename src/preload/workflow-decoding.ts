@@ -1,6 +1,14 @@
-// What main answers for workflows: the list, one workflow, a save, and the version history.
+// What main answers for workflows: the list, one workflow, a save, the version history, and runs.
 
-import { isWorkflowDetail, isWorkflowSaveResult, isWorkflowSummary, isWorkflowVersion } from "@openbot/contracts/ipc";
+import {
+  isWorkflowDetail,
+  isWorkflowRunDetail,
+  isWorkflowRunPage,
+  isWorkflowSaveResult,
+  isWorkflowStep,
+  isWorkflowSummary,
+  isWorkflowVersion,
+} from "@openbot/contracts/ipc";
 import { guardedDecoder, guardedListDecoder } from "@openbot/contracts/ipc-decoding";
 
 export const decodeWorkflowSummaries = guardedListDecoder(isWorkflowSummary, "workflow list response");
@@ -8,3 +16,6 @@ export const decodeWorkflowSummary = guardedDecoder(isWorkflowSummary, "workflow
 export const decodeWorkflowDetail = guardedDecoder(isWorkflowDetail, "workflow response");
 export const decodeWorkflowSaveResult = guardedDecoder(isWorkflowSaveResult, "workflow save response");
 export const decodeWorkflowVersions = guardedListDecoder(isWorkflowVersion, "workflow versions response");
+export const decodeWorkflowRunDetail = guardedDecoder(isWorkflowRunDetail, "workflow run response");
+export const decodeWorkflowRunPage = guardedDecoder(isWorkflowRunPage, "workflow runs response");
+export const decodeWorkflowStep = guardedDecoder(isWorkflowStep, "workflow step response");

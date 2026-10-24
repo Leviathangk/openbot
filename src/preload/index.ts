@@ -277,7 +277,10 @@ import {
 import { decodeVaultImportResult, decodeVaultSecret, decodeVaultState } from "./vault-decoding";
 import {
   decodeWorkflowDetail,
+  decodeWorkflowRunDetail,
+  decodeWorkflowRunPage,
   decodeWorkflowSaveResult,
+  decodeWorkflowStep,
   decodeWorkflowSummaries,
   decodeWorkflowSummary,
   decodeWorkflowVersions,
@@ -694,6 +697,14 @@ const openbotApi: OpenBotDesktopApi = {
     saveGraph: decodeWorkflowSaveResult,
     versions: decodeWorkflowVersions,
     restoreVersion: decodeWorkflowDetail,
+    startRun: decodeWorkflowRunDetail,
+    runStep: decodeWorkflowStep,
+    stopStep: decodeVoid,
+    stopRun: decodeVoid,
+    retryStep: decodeWorkflowStep,
+    decide: decodeVoid,
+    runs: decodeWorkflowRunPage,
+    run: decodeWorkflowRunDetail,
   }),
   routineResults: bridgeGroup(IPC_ENDPOINTS.routineResults, {
     options: decodeRoutineResultOptions,

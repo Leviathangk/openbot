@@ -8,10 +8,17 @@ import type { IpcGroupHandlers } from "./define-ipc-group";
 import { scopedHandler, scopedQueryHandler } from "./scoped-handler";
 import {
   parseCreateWorkflow,
+  parseDecideWorkflowStep,
   parseRenameWorkflow,
   parseRestoreWorkflowVersion,
+  parseRetryWorkflowStep,
+  parseRunWorkflowStep,
   parseSaveWorkflowGraph,
+  parseStartWorkflowRun,
   parseWorkflowId,
+  parseWorkflowRunId,
+  parseWorkflowRuns,
+  parseWorkflowStepId,
 } from "./workflow-inputs";
 
 interface WorkflowIpcDependencies {
@@ -38,6 +45,26 @@ export function workflowIpcHandlers({ workflows }: WorkflowIpcDependencies): Pic
         local: (input) => runCauseEffect(workflows.restoreVersion(input)),
         remote,
       }),
+      startRun: scopedHandler(parseStartWorkflowRun, {
+        local: (input) => runCauseEffect(workflows.startRun(input)),
+        remote,
+      }),
+      runStep: scopedHandler(parseRunWorkflowStep, {
+        local: (input) => runCauseEffect(workflows.runStep(input)),
+        remote,
+      }),
+      stopStep: scopedHandler(parseWorkflowStepId, { local: (id) => runCauseEffect(workflows.stopStep(id)), remote }),
+      stopRun: scopedHandler(parseWorkflowRunId, { local: (id) => runCauseEffect(workflows.stopRun(id)), remote }),
+      retryStep: scopedHandler(parseRetryWorkflowStep, {
+        local: (input) => runCauseEffect(workflows.retryStep(input)),
+        remote,
+      }),
+      decide: scopedHandler(parseDecideWorkflowStep, {
+        local: (input) => runCauseEffect(workflows.decide(input)),
+        remote,
+      }),
+      runs: scopedHandler(parseWorkflowRuns, { local: (input) => runCauseEffect(workflows.runs(input)), remote }),
+      run: scopedHandler(parseWorkflowRunId, { local: (id) => runCauseEffect(workflows.run(id)), remote }),
     },
   };
 }

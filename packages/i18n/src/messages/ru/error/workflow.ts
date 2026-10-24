@@ -12,4 +12,19 @@ export const messages = {
   "error.workflow.serverTooOld":
     "Этот сервер не поддерживает рабочие процессы. Обновите OpenBot на компьютере, на котором он работает.",
   "error.workflow.cycle": "Рабочий процесс не может вернуться к предыдущему шагу.",
+  "error.workflow.nodeUnsupported":
+    "Эта версия OpenBot пока не может выполнять шаги с изображениями, файлами и сообщениями.",
+  "error.workflow.interrupted": "OpenBot остановился во время этого шага. Запустите его снова.",
+  "error.workflow.agentMissing": "Выберите агента для этого шага.",
+  "error.workflow.handoffFailed": "OpenBot не смог отправить этот шаг агенту.",
+  "error.workflow.agentStepEnded": "Сообщение агенту было удалено до его ответа.",
+  "error.workflow.conditionUnclear": "Модель не ответила «да» или «нет».",
+  "error.workflow.modelFailed": "Модель не смогла ответить. Запустите шаг снова.",
+  "error.workflow.modelBusy": "Выполняется другой запрос к модели. Скоро запустите шаг снова.",
+  "error.workflow.stepMissing": "Этого шага больше нет.",
+  "error.workflow.nodeMissing": "Этого шага нет в рабочем процессе.",
+  "error.workflow.runMissing": "Этого запуска больше нет.",
+  "error.workflow.notRetryable": "Снова можно запустить только шаг, который завершился ошибкой или был остановлен.",
+  "error.workflow.noDecision": "Этот шаг не ждет решения.",
+  "error.workflow.outputPending": "Эта версия OpenBot пока не может публиковать в канал.",
 } as const satisfies PartialTranslation<typeof source>;

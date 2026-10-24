@@ -485,11 +485,19 @@ import type {
 } from "./ipc-voice";
 import type {
   CreateWorkflowInput,
+  DecideWorkflowStepInput,
   RenameWorkflowInput,
   RestoreWorkflowVersionInput,
+  RetryWorkflowStepInput,
+  RunWorkflowStepInput,
   SaveWorkflowGraphInput,
+  StartWorkflowRunInput,
   WorkflowDetail,
+  WorkflowRunDetail,
+  WorkflowRunPage,
+  WorkflowRunsInput,
   WorkflowSaveResult,
+  WorkflowStep,
   WorkflowSummary,
   WorkflowVersion,
 } from "./ipc-workflows";
@@ -1362,7 +1370,7 @@ export const IPC_ENDPOINTS = {
     updateLink: scopedRequest<UpdateRoutineFlowLinkInput, RoutineFlowLink>()("routine-flows:update-link"),
   },
   /**
-   * Workflows: graphs of steps drawn on a canvas, and their versions. The agent event
+   * Workflows: graphs of steps drawn on a canvas, their versions and their runs. The agent event
    * `workflows-changed` says which workflow changed. A joined server does not answer them yet.
    */
   workflows: {
@@ -1374,6 +1382,14 @@ export const IPC_ENDPOINTS = {
     saveGraph: scopedRequest<SaveWorkflowGraphInput, WorkflowSaveResult>()("workflows:save-graph"),
     versions: scopedRequest<string, WorkflowVersion[]>()("workflows:versions"),
     restoreVersion: scopedRequest<RestoreWorkflowVersionInput, WorkflowDetail>()("workflows:restore-version"),
+    startRun: scopedRequest<StartWorkflowRunInput, WorkflowRunDetail>()("workflows:start-run"),
+    runStep: scopedRequest<RunWorkflowStepInput, WorkflowStep>()("workflows:run-step"),
+    stopStep: scopedRequest<string, void>()("workflows:stop-step"),
+    stopRun: scopedRequest<string, void>()("workflows:stop-run"),
+    retryStep: scopedRequest<RetryWorkflowStepInput, WorkflowStep>()("workflows:retry-step"),
+    decide: scopedRequest<DecideWorkflowStepInput, void>()("workflows:decide"),
+    runs: scopedRequest<WorkflowRunsInput, WorkflowRunPage>()("workflows:runs"),
+    run: scopedRequest<string, WorkflowRunDetail>()("workflows:run"),
   },
   /**
    * Routine results: an agent routine's answer sent on to a messaging place. Only this computer's host

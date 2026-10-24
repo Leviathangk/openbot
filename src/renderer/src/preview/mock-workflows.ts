@@ -1,12 +1,19 @@
-// The workflow group of the preview: workflows, graphs and versions in memory. A save checks the
-// revision as the host does; the graph rules stay the host's.
+// The workflow group of the preview: workflows, graphs, versions and runs in memory. A save checks
+// the revision as the host does; the graph rules stay the host's. A run walks the graph as the host
+// does: each step ends after `STEP_MS` with a fixed answer, a condition answers yes, an approval
+// waits for `decide`, and a node with the field `mockFail` fails.
 
-import type {
-  OpenBotDesktopApi,
-  WorkflowDetail,
-  WorkflowGraph,
-  WorkflowSummary,
-  WorkflowVersion,
+import {
+  isWorkflowStepKind,
+  type OpenBotDesktopApi,
+  type WorkflowDetail,
+  type WorkflowGraph,
+  type WorkflowNode,
+  type WorkflowRun,
+  type WorkflowRunDetail,
+  type WorkflowStep,
+  type WorkflowSummary,
+  type WorkflowVersion,
 } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 
@@ -24,6 +31,24 @@ interface MockWorkflowRecord {
 }
 
 const MAX_VERSIONS = 50;
+const STEP_MS = 900;
+const OPEN_STEPS: readonly WorkflowStep["status"][] = ["waiting", "running", "approval"];
+
+/** The fixed answer of a step in the preview. */
+function mockAnswer(node: WorkflowNode, input: string): string {
+  switch (node.kind) {
+    case "trigger":
+      return "";
+    case "prompt":
+      return typeof node.fields.text === "string" ? node.fields.text : "";
+    case "agent":
+      return "I checked the three competitor pages. Two changed their pricing this week.";
+    case "llm":
+      return "Summary: two competitors raised their prices by about 10%.";
+    default:
+      return input;
+  }
+}
 
 /** `emit` sends the agent event `workflows-changed` for one workflow that changed. */
 export function mockWorkflows(
@@ -62,6 +87,161 @@ export function mockWorkflows(
   };
   for (const seed of seeds) put(seed.id, seed.title, seed.graph, 0, seed.updatedAt);
 
+  const runs = new Map<string, { run: WorkflowRun; graph: WorkflowGraph; scope: Set<string> }>();
+  const steps = new Map<string, WorkflowStep>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The input of each step. A retry and an approval hand it on, as the host does. */
+  const stepInputs = new Map<string, string>();
+  const runSteps = (runId: string) => [...steps.values()].filter((step) => step.runId === runId);
+  const latestOf = (runId: string) => {
+    const latest = new Map<string, WorkflowStep>();
+    for (const step of runSteps(runId)) {
+      const current = latest.get(step.nodeId);
+      if (!current || step.attempt >= current.attempt) latest.set(step.nodeId, step);
+    }
+    return latest;
+  };
+  const runDetail = (runId: string): WorkflowRunDetail => {
+    const entry = runs.get(runId);
+    if (!entry) throw new Error(sourceText("error.workflow.runMissing"));
+    return structuredClone({ run: entry.run, steps: runSteps(runId) });
+  };
+  const touchSummary = (workflowId: string, run: WorkflowRun) => {
+    const found = records.get(workflowId);
+    if (found) found.detail.summary.lastRun = { status: run.status, at: run.startedAt };
+  };
+  const end = (step: WorkflowStep, patch: Partial<WorkflowStep>) => {
+    timers.delete(step.id);
+    Object.assign(step, { endedAt: stamp(), ...patch });
+  };
+  const addStep = (workflowId: string, runId: string | null, node: WorkflowNode, input: string) => {
+    const attempt = [...steps.values()].filter((step) => step.runId === runId && step.nodeId === node.id).length + 1;
+    const step: WorkflowStep = {
+      id: crypto.randomUUID(),
+      workflowId,
+      runId,
+      nodeId: node.id,
+      attempt,
+      agentId: node.kind === "agent" && typeof node.fields.agentId === "string" ? node.fields.agentId : null,
+      status: "running",
+      output: null,
+      branch: null,
+      error: null,
+      startedAt: stamp(),
+      endedAt: null,
+    };
+    steps.set(step.id, step);
+    stepInputs.set(step.id, input);
+    if (node.kind === "approval") {
+      step.status = "approval";
+      return step;
+    }
+    timers.set(
+      step.id,
+      setTimeout(() => {
+        if (step.status !== "running") return;
+        if (node.fields.mockFail === true)
+          end(step, { status: "failed", error: sourceText("error.workflow.modelFailed") });
+        else if (node.kind === "condition") end(step, { status: "done", output: input, branch: "yes" });
+        else end(step, { status: "done", output: mockAnswer(node, input) });
+        if (runId) advance(runId);
+        emit(workflowId);
+      }, STEP_MS),
+    );
+    return step;
+  };
+  const inputsOf = (graph: WorkflowGraph, nodeId: string, latest: ReadonlyMap<string, WorkflowStep>) =>
+    graph.edges
+      .filter((edge) => edge.to === nodeId)
+      .flatMap((edge) => {
+        const source = latest.get(edge.from);
+        const active = source?.status === "done" && (source.branch === null || edge.branch === source.branch);
+        return active ? [source.output ?? ""] : [];
+      });
+  /** Starts each node whose nodes before it ended, then sets the run's status. */
+  const advance = (runId: string) => {
+    const entry = runs.get(runId);
+    if (!entry) return;
+    const { run, graph, scope } = entry;
+    for (;;) {
+      const latest = latestOf(runId);
+      let started = false;
+      for (const node of graph.nodes) {
+        if (!scope.has(node.id) || run.status === "stopping") continue;
+        const current = latest.get(node.id);
+        if (current && current.status !== "skipped") continue;
+        const before = graph.edges.filter((edge) => edge.to === node.id && scope.has(edge.from));
+        if (
+          before.some((edge) => {
+            const source = latest.get(edge.from);
+            return !source || OPEN_STEPS.includes(source.status);
+          })
+        )
+          continue;
+        const inputs = inputsOf(graph, node.id, latest);
+        if (before.length > 0 && inputs.length === 0) {
+          if (!current) {
+            const skipped = addStep(run.workflowId, runId, node, "");
+            clearTimeout(timers.get(skipped.id));
+            end(skipped, { status: "skipped" });
+            started = true;
+          }
+          continue;
+        }
+        addStep(run.workflowId, runId, node, inputs.join("\n\n"));
+        started = true;
+      }
+      if (!started) break;
+    }
+    const ends = [...latestOf(runId).values()];
+    const open = ends.filter((step) => OPEN_STEPS.includes(step.status));
+    run.status =
+      open.length > 0
+        ? run.status === "stopping"
+          ? "stopping"
+          : open.every((step) => step.status === "approval")
+            ? "approval"
+            : "running"
+        : run.status === "stopping"
+          ? "stopped"
+          : ends.some((step) => step.status === "failed")
+            ? "failed"
+            : ends.some((step) => step.status === "stopped")
+              ? "stopped"
+              : "done";
+    if (open.length === 0) run.endedAt = stamp();
+    touchSummary(run.workflowId, run);
+  };
+  const stopStep = (step: WorkflowStep) => {
+    if (!OPEN_STEPS.includes(step.status)) return;
+    clearTimeout(timers.get(step.id));
+    end(step, { status: "stopped" });
+  };
+  const nodeOf = (workflowId: string, nodeId: string) => {
+    const node = record(workflowId).detail.graph.nodes.find((entry) => entry.id === nodeId);
+    if (!node) throw new Error(sourceText("error.workflow.nodeMissing"));
+    return node;
+  };
+  const stepOf = (stepId: string) => {
+    const step = steps.get(stepId);
+    if (!step) throw new Error(sourceText("error.workflow.stepMissing"));
+    return step;
+  };
+  /** The nodes after `origin`, and `origin` itself. */
+  const reach = (graph: WorkflowGraph, origin: string) => {
+    const seen = new Set([origin]);
+    const pending = [origin];
+    for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+      for (const edge of graph.edges) {
+        if (edge.from !== id || seen.has(edge.to)) continue;
+        seen.add(edge.to);
+        pending.push(edge.to);
+      }
+    }
+    return seen;
+  };
+  const runRequests = new Map<string, string>();
+
   return {
     list: async () =>
       structuredClone([...records.values()].map((entry) => entry.detail.summary)).sort((left, right) =>
@@ -81,6 +261,7 @@ export function mockWorkflows(
       return structuredClone(next.summary);
     },
     delete: async (workflowId) => {
+      for (const step of steps.values()) if (step.workflowId === workflowId) stopStep(step);
       if (records.delete(workflowId)) emit(workflowId);
     },
     saveGraph: async (input) => {
@@ -103,5 +284,107 @@ export function mockWorkflows(
       emit(input.workflowId);
       return structuredClone(next);
     },
+    startRun: async (input) => {
+      const known = runRequests.get(input.requestId);
+      if (known) return runDetail(known);
+      const { detail } = record(input.workflowId);
+      const graph = structuredClone(detail.graph);
+      const stepNodes = graph.nodes.filter((node) => isWorkflowStepKind(node.kind)).map((node) => node.id);
+      const from = input.fromNodeId;
+      if (from !== undefined && !stepNodes.includes(from)) throw new Error(sourceText("error.workflow.nodeMissing"));
+      const scope = from === undefined ? new Set(stepNodes) : reach(graph, from);
+      const number = [...runs.values()].filter((entry) => entry.run.workflowId === input.workflowId).length + 1;
+      const triggerNodeId =
+        from !== undefined && graph.nodes.find((node) => node.id === from)?.kind === "trigger" ? from : null;
+      const run: WorkflowRun = {
+        id: crypto.randomUUID(),
+        workflowId: input.workflowId,
+        number,
+        triggerNodeId,
+        source: "manual",
+        status: "running",
+        error: null,
+        startedAt: stamp(),
+        endedAt: null,
+      };
+      runs.set(run.id, { run, graph, scope });
+      runRequests.set(input.requestId, run.id);
+      addVersion(input.workflowId, "run");
+      advance(run.id);
+      emit(input.workflowId);
+      return runDetail(run.id);
+    },
+    runStep: async (input) => {
+      const node = nodeOf(input.workflowId, input.nodeId);
+      const step = addStep(input.workflowId, null, node, "");
+      emit(input.workflowId);
+      return structuredClone(step);
+    },
+    stopStep: async (stepId) => {
+      const step = stepOf(stepId);
+      stopStep(step);
+      if (step.runId) advance(step.runId);
+      emit(step.workflowId);
+    },
+    stopRun: async (runId) => {
+      const entry = runs.get(runId);
+      if (!entry) throw new Error(sourceText("error.workflow.runMissing"));
+      entry.run.status = "stopping";
+      for (const step of runSteps(runId)) stopStep(step);
+      advance(runId);
+      emit(entry.run.workflowId);
+    },
+    retryStep: async (input) => {
+      const failed = stepOf(input.stepId);
+      if (failed.status !== "failed" && failed.status !== "stopped")
+        throw new Error(sourceText("error.workflow.notRetryable"));
+      const entry = failed.runId ? runs.get(failed.runId) : undefined;
+      const node =
+        entry?.graph.nodes.find((candidate) => candidate.id === failed.nodeId) ??
+        nodeOf(failed.workflowId, failed.nodeId);
+      if (entry) {
+        entry.run.status = "running";
+        entry.run.endedAt = null;
+      }
+      const step = addStep(failed.workflowId, failed.runId, node, stepInputs.get(failed.id) ?? "");
+      if (entry) advance(entry.run.id);
+      emit(failed.workflowId);
+      return structuredClone(step);
+    },
+    decide: async (input) => {
+      const step = stepOf(input.stepId);
+      if (step.status !== "approval") throw new Error(sourceText("error.workflow.noDecision"));
+      const entry = step.runId ? runs.get(step.runId) : undefined;
+      if (input.approved) {
+        end(step, { status: "done", output: stepInputs.get(step.id) ?? "" });
+      } else {
+        // A rejection stops the whole run.
+        end(step, { status: "stopped" });
+        if (entry) {
+          entry.run.status = "stopping";
+          for (const other of runSteps(entry.run.id)) stopStep(other);
+        }
+      }
+      if (entry) advance(entry.run.id);
+      emit(step.workflowId);
+    },
+    runs: async (input) => {
+      record(input.workflowId);
+      const all = [...runs.values()]
+        .map((entry) => entry.run)
+        .filter((run) => run.workflowId === input.workflowId && (!input.before || run.startedAt < input.before))
+        .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+      const page = all.slice(0, input.limit);
+      return {
+        runs: page.map((run) => runDetail(run.id)),
+        soloSteps: input.before
+          ? []
+          : structuredClone(
+              [...steps.values()].filter((step) => step.workflowId === input.workflowId && step.runId === null),
+            ),
+        nextBefore: all.length > page.length ? (page.at(-1)?.startedAt ?? null) : null,
+      };
+    },
+    run: async (runId) => runDetail(runId),
   };
 }

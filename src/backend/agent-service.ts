@@ -12,6 +12,7 @@ import type {
   AgentMemorySelectionState,
   AgentModelId,
   AgentModelOption,
+  AgentReasoningEffort,
   AgentRuntimeSnapshot,
   AgentSessionSettings,
   AgentStatus,
@@ -2032,6 +2033,63 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
         );
     },
     Effect.mapError((failure) => new AgentLifecycleFailed({ operation: "ask side question", cause: failure.cause })),
+  ).bind(this);
+
+  /**
+   * Answers one model step of a workflow. Like a side question, the generation has no tools, no
+   * session and no thread. A missing provider or model falls back to the user's starting choice.
+   */
+  readonly generateWorkflowText = Effect.fn("AgentService.generateWorkflowText")(
+    function* (
+      this: AgentService,
+      input: {
+        provider: AgentProvider | null;
+        model: string | null;
+        effort: AgentReasoningEffort | null;
+        prompt: string;
+      },
+    ) {
+      const failed = (message: string) => new ProfileGenerationFailed({ cause: new Error(message) });
+      if (this.#stopping) return yield* failed(sourceText("error.backend.shuttingDown"));
+      if (this.#profileClients.busy()) return yield* failed(sourceText("error.workflow.modelBusy"));
+      const provider = input.provider ?? this.#startingChoice()?.provider ?? this.#providers.preferredProvider();
+      yield* this.#providers.ensureProvider(provider);
+      const models = this.#endpoints.available();
+      const model =
+        (input.model === null
+          ? undefined
+          : models.find((candidate) => candidate.provider === provider && candidate.id === input.model)) ??
+        startingModel(provider, models, this.#preference());
+      if (!model) return yield* failed(sourceText("error.provider.noModel"));
+      if (this.#stopping) return yield* failed(sourceText("error.backend.shuttingDown"));
+      if (this.#profileClients.busy()) return yield* failed(sourceText("error.workflow.modelBusy"));
+      const client = this.#providers.createProfileClient(provider);
+      return yield* this.#profileClients
+        .run(client, (cancelled) =>
+          generateTextWithoutTools(
+            client,
+            { ...model, defaultReasoningEffort: input.effort ?? model.defaultReasoningEffort },
+            input.prompt,
+            cancelled,
+          ),
+        )
+        .pipe(
+          Effect.tapError((failure) =>
+            Effect.sync(() => logger.warn("Could not answer a workflow step.", { provider, error: failure.cause })),
+          ),
+          // The generation's own messages name a profile.
+          Effect.mapError((failure) =>
+            failed(
+              failure instanceof GenerationUsageLimitError
+                ? sourceText("error.provider.usageLimitReached")
+                : sourceText("error.workflow.modelFailed"),
+            ),
+          ),
+        );
+    },
+    Effect.mapError(
+      (failure) => new AgentLifecycleFailed({ operation: "generate workflow text", cause: failure.cause }),
+    ),
   ).bind(this);
 
   saveProfile(

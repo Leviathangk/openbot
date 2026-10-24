@@ -12,4 +12,19 @@ export const messages = {
   "error.workflow.serverTooOld":
     "Ce serveur ne prend pas en charge les workflows. Mettez à jour OpenBot sur l’ordinateur qui l’exécute.",
   "error.workflow.cycle": "Un workflow ne peut pas revenir à une étape précédente.",
+  "error.workflow.nodeUnsupported":
+    "Cette version d’OpenBot ne peut pas encore exécuter les étapes d’image, de fichier et de message.",
+  "error.workflow.interrupted": "OpenBot s’est arrêté pendant cette étape. Relancez-la.",
+  "error.workflow.agentMissing": "Choisissez un agent pour cette étape.",
+  "error.workflow.handoffFailed": "OpenBot n’a pas pu envoyer cette étape à son agent.",
+  "error.workflow.agentStepEnded": "Le message à l’agent a été supprimé avant sa réponse.",
+  "error.workflow.conditionUnclear": "Le modèle n’a pas répondu oui ou non.",
+  "error.workflow.modelFailed": "Le modèle n’a pas pu répondre. Relancez l’étape.",
+  "error.workflow.modelBusy": "Une autre requête au modèle est en cours. Relancez l’étape bientôt.",
+  "error.workflow.stepMissing": "Cette étape n’existe plus.",
+  "error.workflow.nodeMissing": "Cette étape n’est pas dans le workflow.",
+  "error.workflow.runMissing": "Cette exécution n’existe plus.",
+  "error.workflow.notRetryable": "Seule une étape en échec ou arrêtée peut être relancée.",
+  "error.workflow.noDecision": "Cette étape n’attend pas de décision.",
+  "error.workflow.outputPending": "Cette version d’OpenBot ne peut pas encore publier dans un canal.",
 } as const satisfies PartialTranslation<typeof source>;

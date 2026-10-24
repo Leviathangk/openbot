@@ -15,8 +15,9 @@ import { RoutineFlowStore } from "../backend/routine-flows/routine-flow-store";
 import { createRoutineFlows, type RoutineFlowsHandle } from "../backend/routine-flows/routine-flows";
 import { RoutineResultStore } from "../backend/routine-results/routine-result-store";
 import { createRoutineResults, type RoutineResultsHandle } from "../backend/routine-results/routine-results";
+import { WorkflowRunStore } from "../backend/workflows/workflow-run-store";
 import { WorkflowStore } from "../backend/workflows/workflow-store";
-import { createWorkflows, type WorkflowsHandle } from "../backend/workflows/workflows";
+import { createWorkflows, type WorkflowNotice, type WorkflowsHandle } from "../backend/workflows/workflows";
 import { type AcpRegistry, createAcpRegistry } from "./acp-registry";
 import { type AgentAdminSettingsService, createAgentAdminSettings } from "./agent-admin-settings";
 import { spawnAgentDatabaseHost } from "./agent-database-host-process";
@@ -481,6 +482,7 @@ export interface ApplicationServiceContext {
   forwardVoiceModelStatus: (status: VoiceModelStatus) => void;
   forwardVoiceStreamTranscript: (transcript: VoiceStreamTranscript) => void;
   forwardSpeechModelStatus: (status: SpeechModelStatus) => void;
+  forwardWorkflowNotice: (notice: WorkflowNotice) => void;
   prepareForUpdateInstall: () => Promise<void>;
   /** True once a quit starts, also before this function returns. See `CuaDriverRuntimeOptions.quitting`. */
   quitting: () => boolean;
@@ -836,6 +838,7 @@ export async function createApplicationServices({
   forwardVoiceModelStatus,
   forwardVoiceStreamTranscript,
   forwardSpeechModelStatus,
+  forwardWorkflowNotice,
   prepareForUpdateInstall,
   quitting,
 }: ApplicationServiceContext): Promise<ApplicationServices> {
@@ -1717,6 +1720,28 @@ export async function createApplicationServices({
   const workflowRuntime = await Effect.runPromise(
     createWorkflows({
       store: new WorkflowStore({ database: store.database }),
+      runs: new WorkflowRunStore({ database: store.database }),
+      delivery: (deliveryId) => {
+        const found = mailbox.getDelivery(deliveryId)?.delivery;
+        return found ? { status: found.status, turnId: found.turnId, error: found.error } : null;
+      },
+      turnAnswer,
+      // A workflow step is a routine handoff whose routine is the workflow.
+      sendHandoff: (input) => service.enqueueRoutineHandoff(input),
+      stopDelivery: (agentId, deliveryId) => {
+        const found = mailbox.getDelivery(deliveryId)?.delivery;
+        if (!found) return Effect.void;
+        return found.status === "running" && found.turnId
+          ? service.interrupt(agentId, found.turnId)
+          : service.cancelQueuedMessage(agentId, deliveryId);
+      },
+      generateText: (request) =>
+        service.generateWorkflowText(request).pipe(
+          Effect.mapError((failure) => ({
+            message: failure.cause instanceof Error ? failure.cause.message : sourceText("error.workflow.modelFailed"),
+          })),
+        ),
+      notify: forwardWorkflowNotice,
       // An agent event, so this window, joined clients and the web app hear it the same way.
       changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
     }),
@@ -1745,6 +1770,7 @@ export async function createApplicationServices({
   service.on("event", (event) => {
     Effect.runFork(routineFlowRuntime.notice(event));
     Effect.runFork(routineResultRuntime.notice(event));
+    Effect.runFork(workflowRuntime.notice(event));
   });
   teardown.push(TEARDOWN_ORDER.routineResults, "the routine results", () =>
     Effect.runPromise(routineResultRuntime.close()),
@@ -2677,13 +2703,16 @@ export async function createApplicationServices({
       yield* automation.sync();
       // Picks up the flows a restart stopped between one agent's answer and the next agent's message.
       yield* routineFlowRuntime.sweep();
+      // Ends the workflow steps a restart cut off, and moves the runs on.
+      yield* workflowRuntime.sweep();
       // Marks the posts a restart cut off, and sends the answers that ended while OpenBot was closed.
       yield* routineResultRuntime.recover();
     }),
   );
   const describeRestartReadiness = (): RestartReadiness =>
     checkRestartReadiness({
-      agentWork: service.hasActiveWork(),
+      // A workflow model step lives in this process only; agent steps are queued deliveries.
+      agentWork: [...service.hasActiveWork(), ...(workflowRuntime.generating() ? ["routine-run"] : [])],
       hostBlockers: host.describeRestartBlockers(),
       activeBrowserControls: browser.getControlState().sessions.length,
       activeFileTransfers: remoteServers.hasActiveTransfers(),

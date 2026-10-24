@@ -2,7 +2,15 @@
 
 import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import { describe, expect, it } from "vitest";
-import { parseCreateWorkflow, parseSaveWorkflowGraph } from "./workflow-inputs";
+import {
+  parseCreateWorkflow,
+  parseDecideWorkflowStep,
+  parseRetryWorkflowStep,
+  parseRunWorkflowStep,
+  parseSaveWorkflowGraph,
+  parseStartWorkflowRun,
+  parseWorkflowRuns,
+} from "./workflow-inputs";
 
 const node = (id: string, fields: object = {}) => ({ id, kind: "prompt", at: { x: 0, y: 0 }, fields });
 const save = (graph: unknown) => ({ workflowId: "workflow-1", baseRevision: 0, graph });
@@ -64,5 +72,35 @@ describe("workflow payloads from the renderer", () => {
       "Invalid workflow.",
     );
     expect(() => parseCreateWorkflow({ title: "   " })).toThrow("Invalid workflow.");
+  });
+
+  it("keeps only the known fields of the run requests", () => {
+    expect(parseStartWorkflowRun({ workflowId: "w", requestId: "r", extra: 1 })).toEqual({
+      workflowId: "w",
+      requestId: "r",
+    });
+    expect(parseRunWorkflowStep({ workflowId: "w", nodeId: "n", requestId: "r", fromNodeId: "x" })).toEqual({
+      workflowId: "w",
+      nodeId: "n",
+      requestId: "r",
+    });
+    expect(parseDecideWorkflowStep({ stepId: "s", approved: false, output: "x" })).toEqual({
+      stepId: "s",
+      approved: false,
+    });
+  });
+
+  it.each([
+    ["a run without a request id", () => parseStartWorkflowRun({ workflowId: "w" })],
+    ["a start node that is not text", () => parseStartWorkflowRun({ workflowId: "w", requestId: "r", fromNodeId: 1 })],
+    ["a retry without a step", () => parseRetryWorkflowStep({ requestId: "r" })],
+    ["a decision that is not a boolean", () => parseDecideWorkflowStep({ stepId: "s", approved: "yes" })],
+    [
+      "a runs page over the limit",
+      () => parseWorkflowRuns({ workflowId: "w", limit: INPUT_LIMITS.workflowRunsPage + 1 }),
+    ],
+    ["a runs page of zero", () => parseWorkflowRuns({ workflowId: "w", limit: 0 })],
+  ])("refuses %s", (_name, parse) => {
+    expect(parse).toThrow();
   });
 });

@@ -49,6 +49,7 @@ import { BrowserWindow, Notification } from "electron";
 import { isNoUpdateAnswer } from "../backend/agent/routine-quiet-runs";
 import type { AgentService } from "../backend/agent-service";
 import { runCauseEffect } from "../backend/effect-boundary";
+import type { WorkflowNotice } from "../backend/workflows/workflows";
 import type { HostAnalytics } from "./analytics";
 import {
   closeRetainedNotification,
@@ -83,6 +84,8 @@ export interface RendererForwarderDependencies {
 
 /** The newest messages that a finished turn's answer is looked for in. */
 const ANSWER_LOOKUP_LIMIT = 20;
+/** The longest workflow text a notification shows. */
+const WORKFLOW_NOTICE_LENGTH = 200;
 
 /**
  * Returns the forwarders as an object so the entry point can destructure it and keep every
@@ -393,6 +396,27 @@ export function createRendererForwarders({
     return answer && !isNoUpdateAnswer(answer) ? answer : null;
   }
 
+  /** A workflow step that waits for the user, or a workflow output. A click shows the main window. */
+  function forwardWorkflowNotice(notice: WorkflowNotice): void {
+    if (!desktopNotificationsEnabled()) return;
+    const translate = getTranslate();
+    const preview = notificationPreviewEnabled() ? redactText(notice.text).trim() : "";
+    const fallback =
+      notice.kind === "approval"
+        ? translate("notification.workflowApproval")
+        : translate("notification.workflowOutput");
+    const body =
+      preview.length > WORKFLOW_NOTICE_LENGTH
+        ? `${preview.slice(0, WORKFLOW_NOTICE_LENGTH - 1)}…`
+        : preview || fallback;
+    const notification = new Notification({ title: notice.workflowTitle, body });
+    notification.on("click", () => {
+      const current = getMainWindow();
+      if (current && !current.isDestroyed()) showMainWindow(current);
+    });
+    showRetainedNotification(notification);
+  }
+
   function forwardBrowserDisplayState(state: BrowserDisplayState): void {
     for (const window of BrowserWindow.getAllWindows()) {
       sendToRenderer(window, IPC_ENDPOINTS.browser.displayState, state);
@@ -491,6 +515,7 @@ export function createRendererForwarders({
 
   return {
     forwardAgentEvent,
+    forwardWorkflowNotice,
     forwardBrowserDisplayState,
     forwardUpdateStatus,
     forwardUpdatePreference,
