@@ -261,6 +261,8 @@
     "./features/diagrams/diagram-model": "./src/features/diagrams/diagram-model.ts",
     "./features/diagrams/diagram-text": "./src/features/diagrams/diagram-text.ts",
     "./features/diagrams/diagrams.css": "./src/features/diagrams/diagrams.css",
+    "./features/workflows/workflow-model": "./src/features/workflows/workflow-model.ts",
+    "./features/workflows/workflow-run-view": "./src/features/workflows/workflow-run-view.ts",
     "./features/sidebar/Sidebar": "./src/features/sidebar/Sidebar.tsx",
     "./features/mobile-app/android-play-store": "./src/features/mobile-app/android-play-store.ts",
     "./features/mobile-app/ios-testflight": "./src/features/mobile-app/ios-testflight.ts",

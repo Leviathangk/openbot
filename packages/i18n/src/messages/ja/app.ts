@@ -54,6 +54,7 @@ export const messages = {
   "app.rail.agents": "エージェント",
   "app.rail.schedule": "スケジュール",
   "app.rail.tasks": "タスク",
+  "app.rail.workflows": "ワークフロー",
   "app.rail.usage": "使用量",
   "app.rail.marketplace": "マーケットプレイス",
   "app.rail.settings": "設定",

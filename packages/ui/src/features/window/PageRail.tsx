@@ -8,6 +8,7 @@ import {
   MotionTooltip,
   Settings,
   Store,
+  Waypoints,
   Workflow,
 } from "@openbot/ui";
 import { AccountUsageDetails } from "@openbot/ui/features/account/AccountUsageDetails";
@@ -155,7 +156,15 @@ function CustomAgentUsageButton(props: { row: CustomAgentUsageRailRow; onOpen: (
 }
 
 /** The rail pages. Agents and Routines show the same page with a different sidebar list. */
-export type PageRailPage = "agents" | "routines" | "tasks" | "schedule" | "usage" | "marketplace" | "settings";
+export type PageRailPage =
+  | "agents"
+  | "routines"
+  | "workflows"
+  | "tasks"
+  | "schedule"
+  | "usage"
+  | "marketplace"
+  | "settings";
 
 export interface PageRailProps {
   hidden: boolean;
@@ -168,6 +177,8 @@ export interface PageRailProps {
   onAgents: () => void;
   /** Absent when the server has no routines. */
   onRoutines?: (() => void) | undefined;
+  /** Absent when the server has no workflows. */
+  onWorkflows?: (() => void) | undefined;
   /** Absent where the server keeps no tasks. */
   onTasks?: ((button: HTMLElement) => void) | undefined;
   /** Absent where there is no schedule page. */
@@ -232,6 +243,17 @@ export function PageRail(props: PageRailProps) {
               onClick={() => onRoutines()()}
             >
               <Workflow aria-hidden="true" />
+            </RailButton>
+          )}
+        </Show>
+        <Show when={props.onWorkflows}>
+          {(onWorkflows) => (
+            <RailButton
+              label={t("app.rail.workflows")}
+              current={props.current === "workflows"}
+              onClick={() => onWorkflows()()}
+            >
+              <Waypoints aria-hidden="true" />
             </RailButton>
           )}
         </Show>

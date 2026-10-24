@@ -119,6 +119,7 @@ export { default as Upload } from "lucide-solid/icons/upload";
 export { default as UserRound } from "lucide-solid/icons/user-round";
 export { default as UserRoundPlus } from "lucide-solid/icons/user-round-plus";
 export { default as UsersRound } from "lucide-solid/icons/users-round";
+export { default as Waypoints } from "lucide-solid/icons/waypoints";
 export { default as Webhook } from "lucide-solid/icons/webhook";
 export { default as Workflow } from "lucide-solid/icons/workflow";
 export { default as WrapText } from "lucide-solid/icons/wrap-text";
