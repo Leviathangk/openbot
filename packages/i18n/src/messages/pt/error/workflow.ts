@@ -9,5 +9,7 @@ export const messages = {
   "error.workflow.branch": "Somente uma condição pode ter conexões de sim e não.",
   "error.workflow.conditionBranch": "Cada conexão de uma condição deve ser sim ou não.",
   "error.workflow.duplicateEdge": "Estas duas etapas já têm esta conexão.",
+  "error.workflow.serverTooOld":
+    "Este servidor não oferece suporte a fluxos de trabalho. Atualize o OpenBot no computador que o executa.",
   "error.workflow.cycle": "Um fluxo de trabalho não pode voltar a uma etapa anterior.",
 } as const satisfies PartialTranslation<typeof source>;

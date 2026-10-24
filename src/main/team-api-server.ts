@@ -1194,6 +1194,8 @@ export class TeamApiServer {
       const supportsRuntimeSnapshots = connection.capabilities.has("agent-runtime-snapshots");
       const requiredCapability = eventCapability(event);
       if (requiredCapability && !connection.capabilities.has(requiredCapability)) continue;
+      // No Team API protocol describes workflows yet, so no joined client gets their event.
+      if (event.type === "workflows-changed") continue;
       // A task conversation follows the conversation scope too: a desktop asks for it only for its active server.
       if (
         (event.type === "conversation" ||

@@ -9,5 +9,7 @@ export const messages = {
   "error.workflow.branch": "Yalnızca bir koşul evet ve hayır bağlantılarına sahip olabilir.",
   "error.workflow.conditionBranch": "Bir koşuldan çıkan her bağlantı evet veya hayır olmalıdır.",
   "error.workflow.duplicateEdge": "Bu iki adımda bu bağlantı zaten var.",
+  "error.workflow.serverTooOld":
+    "Bu sunucu iş akışlarını desteklemiyor. OpenBot'u sunucuyu çalıştıran bilgisayarda güncelleyin.",
   "error.workflow.cycle": "Bir iş akışı önceki bir adıma geri dönemez.",
 } as const satisfies PartialTranslation<typeof source>;

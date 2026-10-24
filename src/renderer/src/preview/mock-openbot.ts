@@ -187,6 +187,7 @@ import { clone, type Listener, type MockRuntime, matchesQuery } from "./mock-sup
 import { createMockTeam, type MockTeamOptions } from "./mock-team";
 import { createMockVault } from "./mock-vault";
 import { createMockVoice, type MockVoiceOptions } from "./mock-voice";
+import { type MockWorkflowSeed, mockWorkflows } from "./mock-workflows";
 
 export interface MockOpenBotOptions
   extends MockProviderRuntimeOptions,
@@ -220,6 +221,7 @@ export interface MockOpenBotOptions
   routineRuns?: Record<string, RoutineRun[]>;
   routineFlowLinks?: RoutineFlowLink[];
   routineFlowSteps?: RoutineFlowStep[];
+  workflows?: MockWorkflowSeed[];
   customProviders?: CustomProviderSummary[];
   /** The read state of each agent's chat, keyed by agent id. An agent with none shows no unread count. */
   conversationReads?: Record<string, ConversationReadState>;
@@ -1193,6 +1195,9 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
     routineFlows: mockRoutineFlows(
       { routines, routineRuns, links: options.routineFlowLinks, steps: options.routineFlowSteps },
       (agentId) => emitAgentEvent({ type: "routine-flows-changed", agentId }),
+    ),
+    workflows: mockWorkflows(options.workflows ?? [], (workflowId) =>
+      emitAgentEvent({ type: "workflows-changed", workflowId }),
     ),
     routineResults: mockRoutineResults(routines, options, (agentId) =>
       emitAgentEvent({ type: "routines-changed", agentId }),

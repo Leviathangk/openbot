@@ -15,6 +15,8 @@ import { RoutineFlowStore } from "../backend/routine-flows/routine-flow-store";
 import { createRoutineFlows, type RoutineFlowsHandle } from "../backend/routine-flows/routine-flows";
 import { RoutineResultStore } from "../backend/routine-results/routine-result-store";
 import { createRoutineResults, type RoutineResultsHandle } from "../backend/routine-results/routine-results";
+import { WorkflowStore } from "../backend/workflows/workflow-store";
+import { createWorkflows, type WorkflowsHandle } from "../backend/workflows/workflows";
 import { type AcpRegistry, createAcpRegistry } from "./acp-registry";
 import { type AgentAdminSettingsService, createAgentAdminSettings } from "./agent-admin-settings";
 import { spawnAgentDatabaseHost } from "./agent-database-host-process";
@@ -421,6 +423,8 @@ const TEARDOWN_ORDER = {
   teamWebRtcBridge: 100,
   // Before the agent service, so no handoff is sent to an agent while the service stops.
   routineFlows: 103,
+  // Before the agent service, so no workflow step is sent to an agent while the service stops.
+  workflows: 103.5,
   // Before the agent service, so no calendar read finds it stopping.
   routineFeed: 104,
   mcpOAuthRedirect: 105,
@@ -486,6 +490,7 @@ export interface ApplicationServiceContext {
 export interface ApplicationServices {
   service: AgentService;
   routineFlows: RoutineFlowsHandle;
+  workflows: WorkflowsHandle;
   routineResults: RoutineResultsHandle;
   providerRuntimes: ProviderRuntimeManager;
   providerCredentials: ProviderCredentialStore;
@@ -1708,6 +1713,15 @@ export async function createApplicationServices({
     }),
   );
   teardown.push(TEARDOWN_ORDER.routineFlows, "the routine flows", () => Effect.runPromise(routineFlowRuntime.close()));
+  // Graphs of steps drawn on a canvas; see `workflows.ts`.
+  const workflowRuntime = await Effect.runPromise(
+    createWorkflows({
+      store: new WorkflowStore({ database: store.database }),
+      // An agent event, so this window, joined clients and the web app hear it the same way.
+      changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
+    }),
+  );
+  teardown.push(TEARDOWN_ORDER.workflows, "the workflows", () => Effect.runPromise(workflowRuntime.close()));
   // An agent routine's answer sent on to a messaging place; see `routine-results.ts`.
   const routineResultRuntime = await Effect.runPromise(
     createRoutineResults({
@@ -2829,6 +2843,7 @@ export async function createApplicationServices({
   return {
     service,
     routineFlows: routineFlowRuntime,
+    workflows: workflowRuntime,
     routineResults: routineResultRuntime,
     providerRuntimes,
     providerCredentials,

@@ -9,5 +9,7 @@ export const messages = {
   "error.workflow.branch": "Seule une condition peut avoir des connexions oui et non.",
   "error.workflow.conditionBranch": "Chaque connexion d’une condition doit être oui ou non.",
   "error.workflow.duplicateEdge": "Ces deux étapes ont déjà cette connexion.",
+  "error.workflow.serverTooOld":
+    "Ce serveur ne prend pas en charge les workflows. Mettez à jour OpenBot sur l’ordinateur qui l’exécute.",
   "error.workflow.cycle": "Un workflow ne peut pas revenir à une étape précédente.",
 } as const satisfies PartialTranslation<typeof source>;

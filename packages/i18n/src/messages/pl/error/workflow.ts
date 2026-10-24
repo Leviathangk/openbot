@@ -9,5 +9,7 @@ export const messages = {
   "error.workflow.branch": "Tylko warunek może mieć połączenia tak i nie.",
   "error.workflow.conditionBranch": "Każde połączenie z warunku musi być tak albo nie.",
   "error.workflow.duplicateEdge": "Te dwa kroki mają już to połączenie.",
+  "error.workflow.serverTooOld":
+    "Ten serwer nie obsługuje przepływów pracy. Zaktualizuj OpenBot na komputerze, na którym działa.",
   "error.workflow.cycle": "Przepływ pracy nie może wrócić do wcześniejszego kroku.",
 } as const satisfies PartialTranslation<typeof source>;

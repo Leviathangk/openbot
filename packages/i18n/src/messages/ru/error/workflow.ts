@@ -9,5 +9,7 @@ export const messages = {
   "error.workflow.branch": "Только у условия могут быть связи «да» и «нет».",
   "error.workflow.conditionBranch": "Каждая связь от условия должна быть «да» или «нет».",
   "error.workflow.duplicateEdge": "У этих двух шагов уже есть такая связь.",
+  "error.workflow.serverTooOld":
+    "Этот сервер не поддерживает рабочие процессы. Обновите OpenBot на компьютере, на котором он работает.",
   "error.workflow.cycle": "Рабочий процесс не может вернуться к предыдущему шагу.",
 } as const satisfies PartialTranslation<typeof source>;

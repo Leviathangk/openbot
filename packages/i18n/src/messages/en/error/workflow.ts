@@ -9,5 +9,6 @@ export const messages = defineMessages("error.workflow", {
   "error.workflow.branch": "Only a condition can have yes and no connections.",
   "error.workflow.conditionBranch": "Each connection from a condition must be yes or no.",
   "error.workflow.duplicateEdge": "These two steps already have this connection.",
+  "error.workflow.serverTooOld": "This server does not support workflows. Update OpenBot on the computer that runs it.",
   "error.workflow.cycle": "A workflow cannot go back to an earlier step.",
 });

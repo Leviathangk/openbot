@@ -1938,6 +1938,11 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     this.#emit({ type: "routine-flows-changed", agentId });
   }
 
+  /** A workflow changed, so every view showing it reads it again. */
+  notifyWorkflowsChanged(workflowId: string): void {
+    this.#emit({ type: "workflows-changed", workflowId });
+  }
+
   listModels(): AgentModelOption[] {
     return this.#endpoints.available();
   }

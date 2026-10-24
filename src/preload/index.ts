@@ -275,6 +275,13 @@ import {
   decodeTeamSessions,
 } from "./team-decoding";
 import { decodeVaultImportResult, decodeVaultSecret, decodeVaultState } from "./vault-decoding";
+import {
+  decodeWorkflowDetail,
+  decodeWorkflowSaveResult,
+  decodeWorkflowSummaries,
+  decodeWorkflowSummary,
+  decodeWorkflowVersions,
+} from "./workflow-decoding";
 
 const attachmentImportListeners = new Set<(event: AttachmentImportEvent) => void>();
 /**
@@ -677,6 +684,16 @@ const openbotApi: OpenBotDesktopApi = {
     connect: decodeRoutineFlowLink,
     disconnect: decodeVoid,
     updateLink: decodeRoutineFlowLink,
+  }),
+  workflows: bridgeGroup(IPC_ENDPOINTS.workflows, {
+    list: decodeWorkflowSummaries,
+    get: decodeWorkflowDetail,
+    create: decodeWorkflowDetail,
+    rename: decodeWorkflowSummary,
+    delete: decodeVoid,
+    saveGraph: decodeWorkflowSaveResult,
+    versions: decodeWorkflowVersions,
+    restoreVersion: decodeWorkflowDetail,
   }),
   routineResults: bridgeGroup(IPC_ENDPOINTS.routineResults, {
     options: decodeRoutineResultOptions,

@@ -483,6 +483,16 @@ import type {
   VoiceTranscriptionInput,
   VoiceTranscriptionResult,
 } from "./ipc-voice";
+import type {
+  CreateWorkflowInput,
+  RenameWorkflowInput,
+  RestoreWorkflowVersionInput,
+  SaveWorkflowGraphInput,
+  WorkflowDetail,
+  WorkflowSaveResult,
+  WorkflowSummary,
+  WorkflowVersion,
+} from "./ipc-workflows";
 import type { LicenseCheckoutRequest, LicenseRenewalRequest, LicenseState, LicenseUsersRequest } from "./license";
 import type { AccountSession, MobileConnectedDevice, MobileConnectLink, MobileConnectTicket } from "./mobile-connect";
 
@@ -1352,6 +1362,20 @@ export const IPC_ENDPOINTS = {
     updateLink: scopedRequest<UpdateRoutineFlowLinkInput, RoutineFlowLink>()("routine-flows:update-link"),
   },
   /**
+   * Workflows: graphs of steps drawn on a canvas, and their versions. The agent event
+   * `workflows-changed` says which workflow changed. A joined server does not answer them yet.
+   */
+  workflows: {
+    list: scopedQuery<WorkflowSummary[]>()("workflows:list"),
+    get: scopedRequest<string, WorkflowDetail>()("workflows:get"),
+    create: scopedRequest<CreateWorkflowInput, WorkflowDetail>()("workflows:create"),
+    rename: scopedRequest<RenameWorkflowInput, WorkflowSummary>()("workflows:rename"),
+    delete: scopedRequest<string, void>()("workflows:delete"),
+    saveGraph: scopedRequest<SaveWorkflowGraphInput, WorkflowSaveResult>()("workflows:save-graph"),
+    versions: scopedRequest<string, WorkflowVersion[]>()("workflows:versions"),
+    restoreVersion: scopedRequest<RestoreWorkflowVersionInput, WorkflowDetail>()("workflows:restore-version"),
+  },
+  /**
    * Routine results: an agent routine's answer sent on to a messaging place. Only this computer's host
    * keeps a destination, so the group has no remote route. The agent event `routines-changed` says
    * when a destination or a delivery changed.
@@ -1685,6 +1709,7 @@ export const IPC_GROUP_PATHS = {
   hostedSites: "hostedSites",
   routineFeed: "routineFeed",
   routineFlows: "routineFlows",
+  workflows: "workflows",
   routineResults: "routineResults",
   billing: "billing",
   license: "license",
