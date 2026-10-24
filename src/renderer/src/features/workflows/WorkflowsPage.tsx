@@ -308,6 +308,16 @@ function createWorkflowsController(host: WorkflowHost) {
     onDecide: (stepId, approved) => {
       host.workflows.decide({ stepId, approved }).catch(report);
     },
+    // The host makes the address of a trigger that it has, so the secret waits for the save before it.
+    onRotateWebhookSecret: (nodeId) => {
+      flush();
+      const workflowId = current;
+      return new Promise<string>((resolve, reject) => {
+        write(() =>
+          host.workflows.rotateWebhookSecret({ workflowId, nodeId }).then((result) => resolve(result.secret), reject),
+        );
+      });
+    },
     onLoadOlderRuns: () => {
       limit += RUN_PAGE;
       read(current).catch(report);

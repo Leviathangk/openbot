@@ -141,6 +141,8 @@ export const messages = {
   "workflow.trigger.type.webhook": "Webhook",
   "workflow.trigger.type.message": "Mesaj",
   "workflow.trigger.copyWebhook": "Webhook adresini kopyala",
+  "workflow.trigger.webhook.create": "Webhook adresi oluştur",
+  "workflow.trigger.webhook.creating": "Adres oluşturuluyor",
   "workflow.trigger.nextRun": "Sonraki çalıştırma {time}",
 
   "workflow.condition.title": "Koşul",

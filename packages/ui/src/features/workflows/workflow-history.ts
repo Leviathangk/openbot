@@ -182,6 +182,9 @@ export function createCanvasHistory(options: {
   };
 }
 
+/** The schedule of a new trigger node: each day at 09:00, as a new routine has. */
+export const NEW_TRIGGER_SCHEDULE: RoutineSchedule = { kind: "daily", time: "09:00" };
+
 /** The local time zone, which a new schedule trigger runs in. */
 const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 

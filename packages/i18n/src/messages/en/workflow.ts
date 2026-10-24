@@ -140,6 +140,8 @@ export const messages = defineMessages("workflow", {
   "workflow.trigger.type.webhook": "Webhook",
   "workflow.trigger.type.message": "Message",
   "workflow.trigger.copyWebhook": "Copy webhook address",
+  "workflow.trigger.webhook.create": "Create webhook address",
+  "workflow.trigger.webhook.creating": "Creating the address",
   "workflow.trigger.nextRun": "Next run {time}",
 
   "workflow.condition.title": "Condition",

@@ -141,6 +141,8 @@ export const messages = {
   "workflow.trigger.type.webhook": "Webhook",
   "workflow.trigger.type.message": "メッセージ",
   "workflow.trigger.copyWebhook": "Webhook のアドレスをコピー",
+  "workflow.trigger.webhook.create": "Webhook のアドレスを作成",
+  "workflow.trigger.webhook.creating": "アドレスを作成中",
   "workflow.trigger.nextRun": "次回 {time}",
 
   "workflow.condition.title": "条件",

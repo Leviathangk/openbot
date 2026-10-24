@@ -2,19 +2,27 @@
 
 import type { AppTranslate } from "@openbot/i18n";
 import {
+  type RoutineScheduleDraft,
+  routineScheduleFromDraft,
+  routineScheduleToDraft,
+} from "@openbot/team-client/routine-schedule-draft";
+import {
   Button,
   CalendarClock,
   CopyButton,
-  Input,
   MessageSquare,
   MousePointerClick,
   Play,
+  toast,
   Webhook,
   Zap,
 } from "@openbot/ui";
-import { Show, untrack } from "solid-js";
+import { createSignal, Show, untrack } from "solid-js";
 import { useText } from "../../text";
+import { RoutineSchedulePicker } from "../conversation/RoutineSchedulePicker";
+import { RoutineWebhookSecretField } from "../conversation/RoutineWebhookEndpoint";
 import { useBoard } from "./workflow-board";
+import { NEW_TRIGGER_SCHEDULE, stableJson } from "./workflow-history";
 import {
   type Choice,
   ChoicePill,
@@ -27,7 +35,6 @@ import {
   useLocked,
   usePlace,
   useStepRun,
-  useTextField,
 } from "./workflow-node-parts";
 
 type TriggerType = "schedule" | "manual" | "webhook" | "message";
@@ -64,7 +71,6 @@ const TRIGGER_TYPES: readonly TriggerType[] = ["schedule", "manual", "webhook", 
 export function TriggerNode(props: {
   id: string;
   trigger?: TriggerType;
-  schedule?: string;
   connectionId?: string;
   placeId?: string;
   webhookUrl?: string | undefined;
@@ -72,18 +78,44 @@ export function TriggerNode(props: {
   nextRun?: string | undefined;
 }) {
   const board = useBoard();
-  const { t, format } = useText();
+  const { t, format, errorMessage } = useText();
   const [trigger, setTrigger] = useField<TriggerType>(
     () => props.id,
     "trigger",
     untrack(() => props.trigger ?? "schedule"),
     oneOf(TRIGGER_TYPES),
   );
-  const [schedule, setSchedule] = useTextField(
-    () => props.id,
-    "schedule",
-    untrack(() => props.schedule ?? ""),
-  );
+  /**
+   * The draft that the user edits. A cron text with a space at the end saves without it, so the picker
+   * shows this draft while it gives the saved schedule. An undo gives another schedule, and its draft.
+   * A trigger saved without a schedule shows the schedule of a new one.
+   */
+  const [edited, setEdited] = createSignal<RoutineScheduleDraft>();
+  const schedule = () => {
+    const saved = board.schedule(props.id) ?? NEW_TRIGGER_SCHEDULE;
+    const draft = edited();
+    return draft && stableJson(routineScheduleFromDraft(draft)) === stableJson(saved)
+      ? draft
+      : routineScheduleToDraft(saved);
+  };
+  const changeSchedule = (draft: RoutineScheduleDraft) => {
+    setEdited(draft);
+    board.setSchedule(props.id, routineScheduleFromDraft(draft));
+  };
+  /** The signing secret that the host gave once. It shows until the user dismisses it. */
+  const [secret, setSecret] = createSignal<string | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const rotate = async () => {
+    const make = board.rotateWebhookSecret;
+    if (make) setSecret(await make(props.id));
+  };
+  /** The first secret also makes the address, so a new webhook trigger has a button for both. */
+  const create = () => {
+    setCreating(true);
+    rotate()
+      .catch((cause: unknown) => toast.error(errorMessage(cause, t("routine.webhook.regenerateFailed"))))
+      .finally(() => setCreating(false));
+  };
   const place = usePlace(
     () => props.id,
     untrack(() => ({ connectionId: props.connectionId, placeId: props.placeId })),
@@ -124,12 +156,12 @@ export function TriggerNode(props: {
     >
       <Field class="wfn-block-field">
         <Show when={trigger() === "schedule"}>
-          <Input
-            class="wfn-input"
-            aria-label={t("workflow.trigger.type.schedule")}
-            readonly={locked()}
-            value={schedule()}
-            onValueChange={setSchedule}
+          <RoutineSchedulePicker
+            schedule={schedule()}
+            density="card"
+            disabled={locked()}
+            onChange={changeSchedule}
+            onEditEnd={board.endScheduleEdit}
           />
         </Show>
         <Show when={trigger() === "webhook" ? props.webhookUrl : undefined}>
@@ -139,6 +171,29 @@ export function TriggerNode(props: {
               <CopyButton value={url()} iconOnly label={t("workflow.trigger.copyWebhook")} />
             </div>
           )}
+        </Show>
+        <Show when={trigger() === "webhook" && board.rotateWebhookSecret}>
+          <Show
+            when={props.webhookUrl || secret()}
+            fallback={
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={creating()}
+                loadingLabel={t("workflow.trigger.webhook.creating")}
+                disabled={locked()}
+                onClick={create}
+              >
+                {t("workflow.trigger.webhook.create")}
+              </Button>
+            }
+          >
+            <RoutineWebhookSecretField
+              secret={secret()}
+              onSecretDismiss={() => setSecret(null)}
+              onRegenerateSecret={rotate}
+            />
+          </Show>
         </Show>
         <Show when={trigger() === "message"}>
           <PlacePill

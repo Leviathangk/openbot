@@ -4,6 +4,7 @@
  * the same type. Drag between an output and an input in either direction, or press one and then the other.
  */
 
+import type { RoutineSchedule } from "@openbot/contracts/ipc";
 import type { AppTextKey, AppTranslate } from "@openbot/i18n";
 import { Button, Kbd, LabelTooltip, X } from "@openbot/ui";
 import type { JSX } from "@solidjs/web";
@@ -195,6 +196,13 @@ export interface WfnBoard {
   features: () => WorkflowFeatures | undefined;
   /** Runs the workflow from one trigger. Only the canvas has it; elsewhere a trigger runs by itself. */
   runFrom?: ((id: string) => void) | undefined;
+  /** The schedule of a trigger node. The canvas keeps it with the node, not in the fields. */
+  schedule: (id: string) => RoutineSchedule | undefined;
+  /** Changes the schedule of a trigger node. The changes until `endScheduleEdit` are one undo step. */
+  setSchedule: (id: string, schedule: RoutineSchedule) => void;
+  endScheduleEdit: () => void;
+  /** Makes a new signing secret for a webhook trigger, and gives it. Without it, a trigger offers no secret. */
+  rotateWebhookSecret?: ((id: string) => Promise<string>) | undefined;
   /**
    * Runs one step alone, with the inputs that it has now. The step shows the run states, and the host
    * records its result. A step does not run alone while a workflow run is active.
@@ -269,6 +277,10 @@ export interface BoardOptions {
   error?: (id: string) => string | undefined;
   retry?: (id: string) => void;
   runFrom?: (id: string) => void;
+  schedule?: (id: string) => RoutineSchedule | undefined;
+  setSchedule?: (id: string, schedule: RoutineSchedule) => void;
+  endScheduleEdit?: () => void;
+  rotateWebhookSecret?: ((id: string) => Promise<string>) | undefined;
   runStep?: (id: string) => void;
   stopStep?: (id: string) => void;
   running?: () => boolean;
@@ -710,6 +722,10 @@ export function createBoard(options: BoardOptions) {
     error: (id) => options.error?.(id),
     retry: options.retry,
     runFrom: options.runFrom,
+    schedule: (id) => options.schedule?.(id),
+    setSchedule: (id, schedule) => options.setSchedule?.(id, schedule),
+    endScheduleEdit: () => options.endScheduleEdit?.(),
+    rotateWebhookSecret: options.rotateWebhookSecret,
     runStep: (id) => options.runStep?.(id),
     stopStep: options.stopStep,
     running: () => options.running?.() ?? false,

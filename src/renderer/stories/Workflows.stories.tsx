@@ -170,10 +170,10 @@ export const Asset: Story = {
 export const Trigger: Story = {
   render: () => (
     <NodeGallery selected="schedule">
-      <TriggerNode id="schedule" schedule={STORY_SEED.schedule} nextRun={STORY_SEED.nextRun} />
-      <TriggerNode id="manual" trigger="manual" schedule={STORY_SEED.schedule} />
-      <TriggerNode id="webhook" trigger="webhook" schedule={STORY_SEED.schedule} webhookUrl={storyWebhook("webhook")} />
-      <TriggerNode id="message" trigger="message" schedule={STORY_SEED.schedule} />
+      <TriggerNode id="schedule" nextRun={STORY_SEED.nextRun} />
+      <TriggerNode id="manual" trigger="manual" />
+      <TriggerNode id="webhook" trigger="webhook" webhookUrl={storyWebhook("webhook")} />
+      <TriggerNode id="message" trigger="message" />
     </NodeGallery>
   ),
 };
@@ -301,12 +301,7 @@ export const LongText: Story = {
         path={`Reports/${"competitor-watch-".repeat(8)}final.md`}
         title={STORY_SEED.title}
       />
-      <TriggerNode
-        id={LONG_WEBHOOK}
-        trigger="webhook"
-        schedule={STORY_SEED.schedule}
-        webhookUrl={storyWebhook(LONG_WEBHOOK)}
-      />
+      <TriggerNode id={LONG_WEBHOOK} trigger="webhook" webhookUrl={storyWebhook(LONG_WEBHOOK)} />
       <AgentNode id="failed" agentId={AGENT} task={TASK} />
     </NodeGallery>
   ),
@@ -315,7 +310,7 @@ export const LongText: Story = {
 export const Locked: Story = {
   render: () => (
     <NodeGallery selected="agent" locked={["prompt", "agent", "trigger", "note"]}>
-      <TriggerNode id="trigger" schedule={STORY_SEED.schedule} nextRun={STORY_SEED.nextRun} />
+      <TriggerNode id="trigger" nextRun={STORY_SEED.nextRun} />
       <PromptNode id="prompt" text={TASK} />
       <AgentNode id="agent" agentId={AGENT} task={TASK} />
       <NoteNode id="note" text="Locked so that nobody moves the sources by mistake." />

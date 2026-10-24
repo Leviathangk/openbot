@@ -12,7 +12,7 @@ import {
 } from "@openbot/ui/features/workflows/workflow-board";
 import type { JSX } from "@solidjs/web";
 import { createStore, onCleanup, untrack } from "solid-js";
-import { STEP_ANSWER, STORY_IMAGES, storyCatalogs } from "./workflow-story-data";
+import { STEP_ANSWER, STORY_IMAGES, STORY_SEED, storyCatalogs } from "./workflow-story-data";
 
 export function NodeGallery(props: {
   selected?: string;
@@ -70,6 +70,8 @@ export function NodeGallery(props: {
     error: (id) => props.errors?.[id],
     retry: runStep,
     runStep,
+    // Each trigger of the gallery has the schedule of the story workflow.
+    schedule: () => STORY_SEED.schedule,
   });
   return (
     <BoardProvider board={gallery.board}>

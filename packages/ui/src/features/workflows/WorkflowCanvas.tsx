@@ -127,6 +127,7 @@ import {
   createCanvasHistory,
   graphFromSnapshot,
   hostDefaults,
+  NEW_TRIGGER_SCHEDULE,
   snapshotFromGraph,
   stableJson,
 } from "./workflow-history";
@@ -192,6 +193,11 @@ export interface WorkflowCanvasProps {
   onStopRun: (runId: string) => void;
   onRetry: (stepId: string) => void;
   onDecide: (stepId: string, approved: boolean) => void;
+  /**
+   * Makes a new signing secret for a webhook trigger, after the graph that has the trigger is saved.
+   * The first secret also makes the address. Without it, a webhook trigger offers no secret.
+   */
+  onRotateWebhookSecret?: ((nodeId: string) => Promise<string>) | undefined;
   onLoadOlderRuns: () => void;
   onRestoreVersion: (versionId: string) => void;
   /** Shows a version, or the live canvas again with null. Without it, a version in the list restores at once. */
@@ -529,6 +535,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   const [guides, setGuides] = createSignal<readonly Guide[]>([]);
   /** A press focuses the node too; only a focus from the keyboard selects. */
   let pressing = false;
+  /** The trigger whose schedule the open undo step changes. */
+  let scheduleEdit: string | undefined;
   const [dropHeight, setDropHeight] = createSignal(0);
 
   const canvas = createBoard({
@@ -571,6 +579,19 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       if (step) props.onRetry(step);
     },
     runFrom: (id) => props.onRun({ fromNodeId: id }),
+    schedule: (id) => nodes().find((node) => node.id === id)?.schedule,
+    setSchedule: (id, schedule) => {
+      if (scheduleEdit !== id) {
+        commit();
+        scheduleEdit = id;
+      }
+      setNodes((list) => list.map((node) => (node.id === id ? { ...node, schedule } : node)));
+    },
+    endScheduleEdit: () => {
+      scheduleEdit = undefined;
+    },
+    // A host without it gives a webhook trigger no secret, and the host does not change.
+    rotateWebhookSecret: untrack(() => props.onRotateWebhookSecret),
     runStep: (id) => props.onRunStep(id),
     stopStep: (id) => {
       const step = stepOf(id);
@@ -620,14 +641,6 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     board: canvas.snapshot(),
     strokes: strokes(),
   });
-  /** The nodes of a snapshot, with the item that the canvas has for each one, so a node that stays keeps its element. */
-  const reuse = (items: readonly CanvasItem[]) => {
-    const shown = new Map(nodes().map((node) => [node.id, node]));
-    return items.map((item) => {
-      const old = shown.get(item.id);
-      return old && old.kind === item.kind && stableJson(old.schedule) === stableJson(item.schedule) ? old : item;
-    });
-  };
   const putPlaces = (saved: CanvasSnapshot) => {
     // Copies, so a later edit does not change a snapshot that the history keeps.
     setPositions((draft) => {
@@ -644,15 +657,22 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
    * fields keep what the user wrote when redo brings it back.
    */
   const apply = (saved: CanvasSnapshot) => {
-    const kept = reuse(saved.nodes);
-    const ids = new Set(kept.map((node) => node.id));
+    scheduleEdit = undefined;
+    const ids = new Set(saved.nodes.map((node) => node.id));
     const later = nodes().filter((node) => !ids.has(node.id));
-    setNodes([...kept, ...later]);
+    setNodes([...saved.nodes, ...later]);
     putPlaces(saved);
     canvas.restore({ ...saved.board, removed: [...saved.board.removed, ...later.map((node) => node.id)] });
     setStrokes(saved.strokes);
   };
-  const edits = createCanvasHistory({ capture, apply, beforeCommit: () => canvas.endTyping() });
+  const edits = createCanvasHistory({
+    capture,
+    apply,
+    beforeCommit: () => {
+      canvas.endTyping();
+      scheduleEdit = undefined;
+    },
+  });
   const { steps, commit, undo, redo } = edits;
 
   /* --------------------------------------------------------- Versions */
@@ -886,6 +906,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     savedGraph = savedJson(next);
     liveCanvas = undefined;
     settled = false;
+    scheduleEdit = undefined;
     canvas.endTyping();
     closeDrop();
     closeSearch();
@@ -1144,7 +1165,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       draft[id] = at;
     });
     canvas.putFields(id, hostDefaults(kind, props.catalogs, props.features));
-    setNodes((list) => [...list, { id, kind }]);
+    setNodes((list) => [...list, kind === "trigger" ? { id, kind, schedule: NEW_TRIGGER_SCHEDULE } : { id, kind }]);
     return id;
   };
 
@@ -2392,19 +2413,20 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
               }}
             >
               <canvas.Edges />
-              <For each={nodes()}>
+              {/* Keyed by id, so a node keeps its element when undo or a schedule change gives a new item. */}
+              <For each={nodes()} keyed={(node) => node.id}>
                 {(node) => (
                   <div
                     class="wfn-slot"
-                    data-slot={node.id}
+                    data-slot={node().id}
                     ref={(element) => slotResize.observe(element)}
-                    data-kind={node.kind}
+                    data-kind={node().kind}
                     style={{
-                      left: `${positions[node.id]?.x ?? 0}px`,
-                      top: `${positions[node.id]?.y ?? 0}px`,
+                      left: `${positions[node().id]?.x ?? 0}px`,
+                      top: `${positions[node().id]?.y ?? 0}px`,
                     }}
                   >
-                    <CanvasNodeView node={node} trigger={triggerOf(node.id)} />
+                    <CanvasNodeView node={node()} trigger={triggerOf(node().id)} />
                   </div>
                 )}
               </For>

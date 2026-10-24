@@ -13,9 +13,28 @@ import {
   type WorkflowRunDetail,
   type WorkflowStep,
   type WorkflowSummary,
+  type WorkflowTriggerState,
   type WorkflowVersion,
 } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
+import { nextValidRoutineOccurrence } from "@openbot/team-client/routine-schedule";
+
+const PREVIEW_HOOKS = "https://hooks.openbot.run/wf";
+
+/** The next time of a schedule trigger, in its zone. A schedule without a next time, such as a past once, has none. */
+function nextDue(node: WorkflowNode): string | null {
+  if (!node.schedule) return null;
+  const zone = typeof node.fields.timezone === "string" && node.fields.timezone ? node.fields.timezone : undefined;
+  try {
+    return nextValidRoutineOccurrence(
+      node.schedule,
+      zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+      new Date(),
+    ).toISOString();
+  } catch {
+    return null;
+  }
+}
 
 /** A workflow that a story starts with. */
 export interface MockWorkflowSeed {
@@ -57,6 +76,23 @@ export function mockWorkflows(
 ): OpenBotDesktopApi["workflows"] {
   const records = new Map<string, MockWorkflowRecord>();
   const stamp = () => new Date().toISOString();
+  /** The webhook triggers that have a secret, as `<workflowId>/<nodeId>`. The host makes a route only then. */
+  const webhooks = new Set<string>();
+  /** The triggers that the host stores: a message trigger does not run in v1, so it has no state. */
+  const triggersOf = (id: string, graph: WorkflowGraph): WorkflowTriggerState[] =>
+    graph.nodes.flatMap((node): WorkflowTriggerState[] => {
+      if (node.kind !== "trigger") return [];
+      const type = node.fields.trigger ?? "manual";
+      if (type !== "manual" && type !== "schedule" && type !== "webhook") return [];
+      return [
+        {
+          nodeId: node.id,
+          type,
+          nextDueAt: type === "schedule" && node.schedule ? nextDue(node) : null,
+          webhookUrl: type === "webhook" && webhooks.has(`${id}/${node.id}`) ? `${PREVIEW_HOOKS}/${node.id}` : null,
+        },
+      ];
+    });
   const summaryOf = (id: string, title: string, graph: WorkflowGraph, updatedAt: string): WorkflowSummary => ({
     id,
     title,
@@ -70,7 +106,7 @@ export function mockWorkflows(
       summary: summaryOf(id, title, graph, updatedAt),
       graph: structuredClone(graph),
       revision,
-      triggers: [],
+      triggers: triggersOf(id, graph),
     };
     records.set(id, { detail, versions });
     return detail;
@@ -386,7 +422,13 @@ export function mockWorkflows(
       };
     },
     run: async (runId) => runDetail(runId),
-    // The preview has no relay, so the secret is only for the dialog that shows it.
-    rotateWebhookSecret: async () => ({ secret: `whsec_preview_${crypto.randomUUID()}` }),
+    // The preview has no relay: the address takes no request, and the secret is only for the dialog.
+    rotateWebhookSecret: async (input) => {
+      const { detail } = record(input.workflowId);
+      webhooks.add(`${input.workflowId}/${input.nodeId}`);
+      detail.triggers = triggersOf(input.workflowId, detail.graph);
+      emit(input.workflowId);
+      return { secret: `whsec_preview_${crypto.randomUUID()}` };
+    },
   };
 }

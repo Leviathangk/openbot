@@ -141,6 +141,8 @@ export const messages = {
   "workflow.trigger.type.webhook": "Webhook",
   "workflow.trigger.type.message": "Mensaje",
   "workflow.trigger.copyWebhook": "Copiar dirección del webhook",
+  "workflow.trigger.webhook.create": "Crear dirección del webhook",
+  "workflow.trigger.webhook.creating": "Creando la dirección",
   "workflow.trigger.nextRun": "Próxima ejecución {time}",
 
   "workflow.condition.title": "Condición",

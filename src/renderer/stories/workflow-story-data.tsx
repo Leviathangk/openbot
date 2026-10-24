@@ -4,7 +4,13 @@
  * their runs and versions. The nodes have no data of their own.
  */
 
-import type { WorkflowGraph, WorkflowRunDetail, WorkflowStep, WorkflowVersion } from "@openbot/contracts/ipc";
+import type {
+  RoutineSchedule,
+  WorkflowGraph,
+  WorkflowRunDetail,
+  WorkflowStep,
+  WorkflowVersion,
+} from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 import type { WorkflowCatalogs } from "@openbot/ui/features/workflows/workflow-model";
 import type { WorkflowRunView } from "@openbot/ui/features/workflows/workflow-run-view";
@@ -65,7 +71,7 @@ export const STEP_ANSWER: Partial<Record<string, string>> = {
 /** The field values that the stories open with, as the user typed them. */
 export const STORY_SEED = {
   agentId: "research",
-  schedule: "Weekdays 09:00",
+  schedule: { kind: "weekdays", time: "09:00" } satisfies RoutineSchedule,
   /** The next run of the schedule: Monday 26 October, 09:00. */
   nextRun: new Date(2026, 9, 26, 9, 0).toISOString(),
   rule: "The report names a new competitor",
@@ -130,7 +136,8 @@ export const COMPETITOR_WATCH: WorkflowGraph = {
       kind: "trigger",
       id: "start",
       at: { x: 0, y: 440 },
-      fields: { trigger: "schedule", schedule: STORY_SEED.schedule },
+      fields: { trigger: "schedule" },
+      schedule: STORY_SEED.schedule,
     },
     { kind: "asset", id: "moodboard", at: { x: 0, y: 880 }, fields: { file: "moodboard-01.jpg" } },
     {
@@ -192,7 +199,8 @@ export const NEW_COMPETITOR_ALERT: WorkflowGraph = {
       kind: "trigger",
       id: "start",
       at: { x: 0, y: 80 },
-      fields: { trigger: "schedule", schedule: STORY_SEED.schedule },
+      fields: { trigger: "schedule" },
+      schedule: STORY_SEED.schedule,
     },
     {
       kind: "agent",

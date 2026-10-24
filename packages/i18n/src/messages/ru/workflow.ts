@@ -146,6 +146,8 @@ export const messages = {
   "workflow.trigger.type.webhook": "Вебхук",
   "workflow.trigger.type.message": "Сообщение",
   "workflow.trigger.copyWebhook": "Копировать эндпоинт вебхука",
+  "workflow.trigger.webhook.create": "Создать эндпоинт вебхука",
+  "workflow.trigger.webhook.creating": "Создание эндпоинта",
   "workflow.trigger.nextRun": "Следующий запуск {time}",
 
   "workflow.condition.title": "Условие",

@@ -17,7 +17,6 @@ import {
   type WorkflowDetail,
   type WorkflowGraph,
   type WorkflowSummary,
-  type WorkflowTriggerState,
   type WorkflowVersion,
 } from "@openbot/contracts/ipc";
 import { toast } from "@openbot/ui";
@@ -34,7 +33,7 @@ import { fn } from "storybook/test";
 import { defaultSidebarLayout } from "../src/features/sidebar/sidebar-sections";
 import { mockWorkflows } from "../src/preview/mock-workflows";
 import { STORY_AGENTS } from "./fixtures";
-import { STORY_CATALOGS, STORY_SEED, type StoryWorkflow, storyWebhook } from "./workflow-story-data";
+import { STORY_CATALOGS, type StoryWorkflow } from "./workflow-story-data";
 
 /** Every node kind, trigger and output, for the stories whose workflows use them all. */
 export const STORY_ALL_FEATURES: WorkflowFeatures = {
@@ -52,23 +51,6 @@ const RUN_PAGE = 20;
 type StoryCanvasProps = Omit<WorkflowCanvasProps, "workflow" | "features" | "frame" | "readOnly">;
 
 const newestFirst = (left: string | null, right: string | null) => (right ?? "").localeCompare(left ?? "");
-
-/** The trigger state that the desktop host gives: the next time of a schedule and the webhook address. */
-function withTriggers(detail: WorkflowDetail): WorkflowDetail {
-  const triggers = detail.graph.nodes.flatMap((node): WorkflowTriggerState[] => {
-    if (node.kind !== "trigger") return [];
-    const type = WORKFLOW_TRIGGER_TYPES.find((entry) => entry === node.fields.trigger) ?? "schedule";
-    return [
-      {
-        nodeId: node.id,
-        type,
-        nextDueAt: type === "schedule" ? STORY_SEED.nextRun : null,
-        webhookUrl: type === "webhook" ? storyWebhook(node.id) : null,
-      },
-    ];
-  });
-  return { ...detail, triggers };
-}
 
 /** The runs of the mock above the fixture runs. A mock run takes the numbers after the fixture runs. */
 function mergeRuns(fixture: WorkflowRunView, live: WorkflowRunView): WorkflowRunView {
@@ -158,7 +140,7 @@ function createWorkflowStory(workflows: readonly StoryWorkflow[]) {
       );
     }
     lastGraphs.set(workflowId, next.graph);
-    setStored({ detail: withTriggers(next), runs: page, versions });
+    setStored({ detail: next, runs: page, versions });
     return next;
   };
 
@@ -166,7 +148,7 @@ function createWorkflowStory(workflows: readonly StoryWorkflow[]) {
   const reset = (next: WorkflowDetail) => {
     base = { workflowId: next.summary.id, revision: next.revision };
     lastGraphs.set(next.summary.id, next.graph);
-    setStored((open) => open && { ...open, detail: withTriggers(next) });
+    setStored((open) => open && { ...open, detail: next });
     setPreview(undefined);
     setResetKey((key) => key + 1);
   };
@@ -269,6 +251,12 @@ function createWorkflowStory(workflows: readonly StoryWorkflow[]) {
     },
     onDecide: (stepId, approved) => {
       if (!fixtureSteps.has(stepId)) api.decide({ stepId, approved }).catch(report);
+    },
+    onRotateWebhookSecret: (nodeId) => {
+      const workflowId = current;
+      return new Promise<string>((resolve, reject) => {
+        write(() => api.rotateWebhookSecret({ workflowId, nodeId }).then((result) => resolve(result.secret), reject));
+      });
     },
     onLoadOlderRuns: () => {
       limit += RUN_PAGE;
