@@ -338,11 +338,16 @@ type DrawMode = Brush | "eraser";
 /** The size of a new sticky note, as its card in the CSS. */
 const NOTE_SIZE = { width: 240, height: 240 };
 
-function InkLine(props: { stroke: Stroke; erasing?: boolean }) {
+function InkLine(props: {
+  stroke: Stroke;
+  erasing?: boolean;
+  /** The points of the line that the user draws now, in place of the points of the stroke. */
+  points?: readonly WfnPoint[];
+}) {
   return (
     <path
       class="wfn-ink-line"
-      d={inkPath(props.stroke.points)}
+      d={inkPath(props.points ?? props.stroke.points)}
       stroke-width={props.stroke.width}
       data-brush={props.stroke.brush}
       data-erasing={props.erasing ? "" : undefined}
@@ -656,6 +661,11 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     erasing: [],
     eraser: null,
   });
+  /**
+   * The points of the line that the pointer draws now. Each move adds to the same array and sets it
+   * again, so the signal does not compare the values, and a move does not copy the line.
+   */
+  const [sketchPoints, setSketchPoints] = createSignal<readonly WfnPoint[]>([], { equals: false });
 
   const capture = (): CanvasSnapshot => ({
     nodes: nodes(),
@@ -799,9 +809,16 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   const targets = (id: string) => (board.isSelected(id) && group().length > 1 ? group() : [id]);
   const groupLocked = () => group().every((id) => board.isLocked(id));
 
-  const live = () => nodes().filter((node) => !board.isRemoved(node.id));
+  /** The nodes on the canvas. Many views read the list, so it is made once for each change. */
+  const live = createMemo(() => nodes().filter((node) => !board.isRemoved(node.id)));
   const kindOf = (id: string) => nodes().find((node) => node.id === id)?.kind;
-  const triggerOf = (id: string) => props.workflow.triggers.find((trigger) => trigger.nodeId === id);
+  /** The saved trigger of each trigger node, by node id. The first trigger of a node wins, as before. */
+  const triggers = createMemo(() => {
+    const byNode = new Map<string, WorkflowDetail["triggers"][number]>();
+    for (const trigger of props.workflow.triggers) if (!byNode.has(trigger.nodeId)) byNode.set(trigger.nodeId, trigger);
+    return byNode;
+  });
+  const triggerOf = (id: string) => triggers().get(id);
   /** A prompt or a file gives its value with no step, so it counts as done when the steps after it run. */
   const passive = (id: string) => {
     const kind = kindOf(id);
@@ -1102,13 +1119,15 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   const fitView = (byUser: boolean) => {
     const { width, height } = view();
     const boxes = [
-      ...live()
-        .map((node) => {
-          const element = viewport?.querySelector<HTMLElement>(`[data-slot="${node.id}"]`);
-          const at = positions[node.id];
-          return element && at ? { ...at, width: element.offsetWidth, height: element.offsetHeight } : null;
-        })
-        .filter((box) => box !== null),
+      // The resize observer gives the sizes. A node that mounted in this frame has none yet, so the
+      // fit reads its element.
+      ...live().flatMap((node) => {
+        const box = boxOf(node.id);
+        if (box) return [box];
+        const element = slot(node.id);
+        const at = positions[node.id];
+        return element && at ? [{ ...at, width: element.offsetWidth, height: element.offsetHeight }] : [];
+      }),
       ...strokes()
         .filter((stroke) => stroke.points.length > 0)
         .map(strokeBox),
@@ -1685,21 +1704,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   const minimap = createMemo(() => {
     if (!ui.minimap) return undefined;
     const boxes = live().flatMap((node) => {
-      const at = positions[node.id];
-      const element = slot(node.id);
-      const size = sizes[node.id];
-      return at && element
-        ? [
-            {
-              id: node.id,
-              kind: node.kind,
-              x: at.x,
-              y: at.y,
-              width: size?.width ?? element.offsetWidth,
-              height: size?.height ?? element.offsetHeight,
-            },
-          ]
-        : [];
+      const box = boxOf(node.id);
+      return box ? [{ id: node.id, kind: node.kind, ...box }] : [];
     });
     const { width, height } = view();
     const seen = { ...toWorld({ x: 0, y: 0 }), width: width / camera.scale, height: height / camera.scale };
@@ -1883,12 +1889,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
           if (last && Math.hypot(at.x - last.x, at.y - last.y) * camera.scale < INK_STEP) continue;
           current.points.push(at);
         }
-        if (current.kind === "draw") {
-          const sketch = { ...current.stroke, points: [...current.points] };
-          setInk((draft) => {
-            draft.sketch = sketch;
-          });
-        }
+        if (current.kind === "draw") setSketchPoints(current.points);
         return;
       }
       const point = local(event);
@@ -2139,7 +2140,9 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
             width: INK_WIDTH[mode] / camera.scale,
             points: [at],
           };
-          gesture = { kind: "draw", start, moved: false, stroke, points: [at] };
+          const points = [at];
+          gesture = { kind: "draw", start, moved: false, stroke, points };
+          setSketchPoints(points);
           setInk((draft) => {
             draft.sketch = stroke;
           });
@@ -2544,7 +2547,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
                 <For each={strokes()}>
                   {(stroke) => <InkLine stroke={stroke} erasing={ink.erasing.includes(stroke.id)} />}
                 </For>
-                <Show when={ink.sketch}>{(stroke) => <InkLine stroke={stroke()} />}</Show>
+                <Show when={ink.sketch}>{(stroke) => <InkLine stroke={stroke()} points={sketchPoints()} />}</Show>
               </svg>
               {/* Keyed by its line, so a guide that stays during a drag keeps its element and fades in once. */}
               <For each={guides()} keyed={(guide) => `${guide.axis}:${guide.at}`}>

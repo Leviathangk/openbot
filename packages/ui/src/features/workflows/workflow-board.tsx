@@ -8,7 +8,17 @@ import type { RoutineSchedule, StoredFileRow } from "@openbot/contracts/ipc";
 import type { AppTextKey, AppTranslate } from "@openbot/i18n";
 import { Button, Kbd, LabelTooltip, X } from "@openbot/ui";
 import type { JSX } from "@solidjs/web";
-import { createContext, createSignal, createStore, For, onSettled, Show, untrack, useContext } from "solid-js";
+import {
+  createContext,
+  createProjection,
+  createSignal,
+  createStore,
+  For,
+  onSettled,
+  Show,
+  untrack,
+  useContext,
+} from "solid-js";
 import { useText } from "../../text";
 import { prefersReducedMotion } from "../../utils";
 import { diagramEdgeMidpoint, diagramEdgePath } from "../diagrams/diagram-graph";
@@ -443,6 +453,18 @@ export function isEditable(element: Element | null): boolean {
   );
 }
 
+/**
+ * A store with a key for each id of a list. A node that reads its own key runs again only when its id
+ * joins or leaves the list, not on each change of the list.
+ */
+function createMembership(ids: () => readonly string[]) {
+  return createProjection<Record<string, true>>((draft) => {
+    const next = new Set(ids());
+    for (const id of Object.keys(draft)) if (!next.has(id)) delete draft[id];
+    for (const id of next) draft[id] = true;
+  }, {});
+}
+
 /** The roles of controls that use letter, arrow and Delete keys themselves. */
 const KEYED_CONTROL = "[role=combobox], [role=listbox], [role^=menu], [role=option]";
 
@@ -744,15 +766,18 @@ export function createBoard(options: BoardOptions) {
   };
 
   const resultsOf = (id: string): readonly WfnResult[] => options.resultsOf?.(id) ?? state.results[id] ?? [];
+  const selectedIds = createMembership(() => state.selection);
+  const removedIds = createMembership(() => state.removed);
+  const lockedIds = createMembership(() => state.locked);
 
   const board: WfnBoard = {
     selected: () => (state.selection.length === 1 ? (state.selection[0] ?? null) : null),
-    isSelected: (id) => state.selection.includes(id),
-    isRemoved: (id) => state.removed.includes(id),
+    isSelected: (id) => selectedIds[id] === true,
+    isRemoved: (id) => removedIds[id] === true,
     remove: (id) => deleteNodes([id]),
     aimRemove: setAiming,
     isDoomed,
-    isLocked: (id) => state.locked.includes(id),
+    isLocked: (id) => lockedIds[id] === true,
     lock: (id, locked) => lockAll([id], locked),
     lockedCount: () => state.locked.length,
     unlockAll: () => {
