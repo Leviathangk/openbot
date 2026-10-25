@@ -3,7 +3,7 @@
 // revocation. A webhook trigger has no address until its first secret; the secret is stored as
 // ciphertext only; a signed request starts one run, and the same delivery again starts none; a wrong
 // signature is refused; a new secret replaces the old one and keeps the address; a workflow that
-// still runs skips a request; a removed trigger and a deleted workflow revoke their routes. No app,
+// still runs skips a request; a graph that cannot run keeps the request as done; a removed trigger and a deleted workflow revoke their routes. No app,
 // provider, account or network is started.
 //
 // Run: bun scripts/workflow-webhook-e2e.ts
@@ -247,7 +247,43 @@ try {
   statuses.gatedRepeat = (await deliver(gatedRoute, gatedSecret.secret, "refund-2")).status;
   check("a skipped delivery again is a no-op", statuses.gatedRepeat === 200);
 
-  // 6. A removed trigger and a deleted workflow revoke their routes at the relay.
+  // 6. A graph that this version cannot run keeps the request as done, so the sender does not send
+  // it again.
+  const filed = await runCauseEffect(workflows.create({ title: "File orders" }));
+  const filedSaved = await runCauseEffect(
+    workflows.saveGraph({
+      workflowId: filed.summary.id,
+      baseRevision: filed.revision,
+      graph: {
+        nodes: [trigger("webhook"), { id: "step", kind: "output", at: { x: 300, y: 0 }, fields: { target: "file" } }],
+        edges: [{ id: "edge", from: "trigger", to: "step", type: "text" }],
+        strokes: [],
+      },
+    }),
+  );
+  assert.ok(filedSaved.ok);
+  const filedSecret = await runCauseEffect(
+    events.rotateWorkflowSecret({ workflowId: filed.summary.id, nodeId: "trigger" }),
+  );
+  const filedRoute = routeIdOf(await webhookUrl(filed.summary.id));
+  statuses.refused = (await deliver(filedRoute, filedSecret.secret, "file-1")).status;
+  check(
+    "a graph that cannot run accepts the request and starts no run",
+    statuses.refused === 202 && (await runsOf(filed.summary.id)).length === 0,
+    statuses,
+  );
+  const refusedReceipt = database.connection
+    .prepare("SELECT status, reason FROM workflow_webhook_receipts WHERE delivery_id = 'file-1'")
+    .get();
+  check(
+    "the refused request has a refused receipt",
+    refusedReceipt?.status === "ignored" && refusedReceipt.reason === "refused",
+    refusedReceipt,
+  );
+  statuses.refusedRepeat = (await deliver(filedRoute, filedSecret.secret, "file-1")).status;
+  check("a refused delivery again is a no-op", statuses.refusedRepeat === 200);
+
+  // 7. A removed trigger and a deleted workflow revoke their routes at the relay.
   const current = await runCauseEffect(workflows.get(ordersId));
   const manual = await runCauseEffect(
     workflows.saveGraph({ workflowId: ordersId, baseRevision: current.revision, graph: graphOf("manual", "notify") }),

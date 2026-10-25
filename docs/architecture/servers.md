@@ -168,16 +168,21 @@ in the Routines view; the web client shows the view switch only when the host se
 
 `workflows-v1` serves the workflow canvas (see [Workflows](agents.md#workflows)) to a joined desktop
 and to the web client. Its routes are `POST /v1/workflows/<name>` with the input in the body:
-`list`, `get`, `create`, `rename`, `delete`, `save-graph`, `versions`, `restore-version`,
-`start-run`, `run-step`, `stop-step`, `stop-run`, `retry-step`, `decide`, `runs`, `run` and
-`rotate-webhook-secret`. The contract header in `team-protocol/workflows-v1.ts` records the grant:
+`list`, `get`, `create`, `rename`, `delete`, `save-graph`, `versions`, `version-graph`,
+`restore-version`, `start-run`, `run-step`, `stop-step`, `stop-run`, `retry-step`, `decide`, `runs`,
+`run` and `rotate-webhook-secret`. `version-graph` gives the graph of one version for the preview,
+with the same filter as `get`. The contract header in `team-protocol/workflows-v1.ts` records the grant:
 
 - A member sees a workflow only when every agent of its agent steps is visible and no model step
   names a provider that the member's protocol hides (a local-only provider hides it from every
-  peer, the owner on a remote client too). The host answers any other workflow, and its runs and
-  steps, with 404.
-- A change, a restore or a run also needs the chat level for each named agent, before and after the
-  change (403 `agentViewOnly`). A restore checks the graph of the version.
+  peer, the owner on a remote client too). An owner or admin also sees a workflow that names a
+  deleted agent, so they can fix or delete it. The host answers any other workflow, and its runs,
+  steps and versions, with 404.
+- A run, a single step, a stop, a retry or a decision needs the chat level for each named agent. A
+  retry, a stop and a decision check the agents of the run's graph, not of the current graph.
+- A change, a rename, a delete, a restore or a new webhook secret needs the manage level for each
+  named agent, before and after the change (403). A restore checks the graph of the version. The
+  desktop shows the canvas read-only when the member does not manage each agent of the graph.
 - Only an owner or admin can add an output that posts to a messaging place, or change its place
   (403 `adminRequired`); a member can keep and run one that is there.
 - A step of an agent that is hidden now does not cross: the generic hidden-agent filter of the
@@ -187,6 +192,10 @@ and to the web client. Its routes are `POST /v1/workflows/<name>` with the input
 - Step output and error cross with at most 32,000 characters each, and a run sends its newest
   2,000 steps. When a page of runs would not fit one WebRTC frame, the host empties the step texts
   of the oldest runs first, then answers 413 `tooLargeToSend`.
+
+Node kinds, port types, statuses, run sources, trigger types and version kinds cross as open names,
+so a newer host can add one. A client shows a workflow with a node kind or a port type that it does
+not know as read-only (`needsNewerApp`), and keeps the node when it saves.
 
 The optional event `workflows-changed { workflowId }` names the workflow that changed, so the
 client reads it again. A client without the capability shows `serverTooOld` on the Workflows page.

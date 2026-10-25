@@ -183,15 +183,18 @@ changed, on this computer and on a joined host.
 - `packages/ui/src/features/workflows/` is the canvas. It reads no application context: it takes
   the document, catalogs, run state and callbacks as props. Edits stay local for fast drags and
   undo, and the canvas gives the new document after each history step.
-  `src/renderer/src/features/workflows/` holds `WorkflowsPage.tsx` and `workflows-port.ts`, the
-  port over `window.openbot.workflows`. The page saves the graph 400 ms after the last edit, one save
-  at a time on its base revision, and loads the graph again after a change from another device.
+  `src/renderer/src/features/workflows/` holds `WorkflowsPage.tsx`, `workflows-port.ts` (the port
+  over `window.openbot.workflows`) and `workflows-controller.ts`. The controller is the same for the
+  page and the stories. It saves the graph 400 ms after the last edit, one save at a time on its
+  base revision. A failed save keeps the edit for the next save. A change from another device, a
+  conflict or a restore loads the graph again, and undo on the canvas gets the edits back.
 - `src/backend/workflows/` owns the tables of migration 46: workflows, nodes, edges, versions,
   triggers, webhook triggers and receipts, runs, steps and output posts. The rows are written
   directly, not through `dispatch`, as for routine flows. `workflow-graph.ts` checks the graph rules
   (no cycles, branch edges only from a condition, port types, limits). A save with an old revision
   answers the current graph as a conflict. The store keeps at most 50 versions: one when the newest
-  is older than 5 minutes, one on a restore, and one when a run starts.
+  is older than 5 minutes, one on a restore, and one when a run starts on a graph revision that has
+  no version yet.
 - `Workflows` (`workflows.ts`) is an Effect service on its own managed runtime. A run copies the
   graph. Each pass ends the steps that ended and starts each node whose inputs are in
   (`workflow-walk.ts`). Passes run one at a time; a pass runs after a turn or queue event, after
@@ -206,7 +209,8 @@ changed, on this computer and on a joined host.
   occurrences become one run. A webhook trigger has a route of its own owner kind (`workflow`); see
   [Route lifecycle](events.md#route-lifecycle).
 - A restart keeps approvals and agent steps, because their state is in the database and the
-  mailbox. The first pass fails a model step that was running. A post that did not start is sent; a
+  mailbox. The first pass fails a model step that was running, and ends a run that was stopping. An
+  agent step fails with `agentMissing` when its agent is deleted. A post that did not start is sent; a
   post that was on its way fails as uncertain, and the user retries the step.
 - Image, asset, file output and message trigger nodes are kept in the graph but do not run yet; a
   run that reaches one fails with `nodeUnsupported`.
