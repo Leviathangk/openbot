@@ -58,7 +58,7 @@ import { coalescedPasses } from "../coalesced-passes";
 import type { MessagingPostFailure } from "../messaging/messaging-threads";
 import { resultText } from "../routine-results/routine-results";
 import type { ReceivedWebhookEvent } from "../routine-store";
-import { nodeAgentId } from "./workflow-graph";
+import { graphAgentIds, nodeAgentId } from "./workflow-graph";
 import {
   isOpenStep,
   publicRun,
@@ -175,6 +175,12 @@ export type WorkflowWebhookResult =
   | { kind: "gone" }
   | { kind: "too-large" };
 
+/** The workflow of a run or a step, and the agents that the run can still reach. */
+export interface WorkflowRunScope {
+  workflowId: string;
+  agentIds: string[];
+}
+
 export interface WorkflowsShape {
   list(): Effect.Effect<WorkflowSummary[], WorkflowFailed>;
   /** Every workflow with its graph, in one read. */
@@ -204,8 +210,11 @@ export interface WorkflowsShape {
   decide(input: DecideWorkflowStepInput): Effect.Effect<void, WorkflowFailed>;
   runs(input: WorkflowRunsInput): Effect.Effect<WorkflowRunPage, WorkflowFailed>;
   run(runId: string): Effect.Effect<WorkflowRunDetail, WorkflowFailed>;
-  /** The workflow of a run or a step, or null when there is no such run or step. */
-  workflowOf(ref: { runId: string } | { stepId: string }): Effect.Effect<string | null, WorkflowFailed>;
+  /**
+   * The workflow of a run or a step, and the agents that the run graph and the step name, or null when
+   * there is no such run or step. A retry or a decision moves the run on its own graph, not the current one.
+   */
+  workflowOf(ref: { runId: string } | { stepId: string }): Effect.Effect<WorkflowRunScope | null, WorkflowFailed>;
   /** Moves every run that can move now. */
   sweep(): Effect.Effect<void>;
   /** Asks for a sweep when an agent event may have ended a step. Returns at once. */
@@ -1004,9 +1013,16 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         });
 
         const workflowOf = Effect.fn("Workflows.workflowOf")(function* (ref: { runId: string } | { stepId: string }) {
-          return yield* attempt(
-            () => ("runId" in ref ? runs.run(ref.runId) : runs.step(ref.stepId))?.workflowId ?? null,
-          );
+          return yield* attempt((): WorkflowRunScope | null => {
+            const step = "stepId" in ref ? runs.step(ref.stepId) : null;
+            const runId = "runId" in ref ? ref.runId : step?.runId;
+            const run = runId ? runs.run(runId) : null;
+            const workflowId = step?.workflowId ?? run?.workflowId;
+            if (!workflowId) return null;
+            const agentIds = new Set(run ? graphAgentIds(run.graph) : []);
+            if (step?.agentId) agentIds.add(step.agentId);
+            return { workflowId, agentIds: [...agentIds] };
+          });
         });
 
         return Workflows.of({

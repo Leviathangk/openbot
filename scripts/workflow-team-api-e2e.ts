@@ -1,9 +1,11 @@
 // Checks the workflows-v1 Team API grant. A real `TeamApiServer` runs on loopback with the real team,
 // agent, mailbox, sidebar, roles and workflow stores on a temporary profile. The owner sets agent
 // levels; a member signs in as a current desktop client does. Each request and answer goes through the
-// frozen codec. The host must hide a workflow that names a closed agent, refuse a change or a run
-// without the chat level, keep the messaging place of an output to an owner or admin, keep the webhook
-// URL and secret from a member, clip step texts, drop the step of an agent that is hidden now, hide a
+// frozen codec. The host must hide a workflow that names a closed agent (but show the owner one whose
+// agent was deleted), refuse a run without the chat level and a change, rename or delete without the
+// manage level, keep the messaging place of an output to an owner or admin, keep the webhook URL and
+// secret from a member, clip step texts, drop the step of an agent that is hidden now and refuse its
+// retry, hide a
 // workflow of a local-only provider, refuse a workflow too large for one frame, and tell the member's
 // event socket about a change. The codec carries kinds and statuses that this app does not know, and
 // the client shows a workflow with such a node read-only; a member reads the graph of an old version.
@@ -351,6 +353,9 @@ type RefusalKey =
   | "error.workflow.versionMissing"
   | "error.workflow.tooLargeToSend"
   | "error.team.agentViewOnly"
+  | "error.team.agentManageDenied"
+  | "error.workflow.stepMissing"
+  | "error.workflow.runMissing"
   | "error.team.adminRequired";
 
 /** A request that must answer `status` with the sentence of `key`. */
@@ -489,7 +494,7 @@ try {
   const ownerToken = await login(OWNER);
 
   const setup = await step(
-    "setup: an owner, a member, four agents with the levels manage, none, view and manage",
+    "setup: an owner, a member, five agents with the levels manage, none, view, manage and chat",
     async () => {
       const { agents, team } = current();
       const create = async (name: string) =>
@@ -502,18 +507,19 @@ try {
       const closed = await create("Closed");
       const viewer = await create("Viewer");
       const later = await create("Later");
+      const chatter = await create("Chatter");
       const invite = await runCauseEffect(team.createInvite("member"));
       const joined = await call("POST", TEAM_API_ROUTES.join.server, {
         body: { inviteToken: invite.token, ...MEMBER },
       });
       assert.equal(joined.status, 201, `Join returned ${joined.status}.`);
       const memberToken = await login(MEMBER);
-      await setLevels(ownerToken, { [closed]: "none", [viewer]: "view" });
-      return { ids: { open, closed, viewer, later }, memberToken };
+      await setLevels(ownerToken, { [closed]: "none", [viewer]: "view", [chatter]: "chat" });
+      return { ids: { open, closed, viewer, later, chatter }, memberToken };
     },
     ({ ids }) => ({ ids }),
   );
-  const { open, closed, viewer, later } = setup.ids;
+  const { open, closed, viewer, later, chatter } = setup.ids;
   const member = setup.memberToken;
   failingAgent = later;
 
@@ -568,7 +574,7 @@ try {
       member,
       { workflowId: ids.viewer, baseRevision: revision, graph: { nodes: [promptNode], edges: [], strokes: [] } },
       403,
-      "error.team.agentViewOnly",
+      "error.team.agentManageDenied",
     );
     const start = await refused(
       WORKFLOWS_ROUTES.startRun,
@@ -582,10 +588,69 @@ try {
       member,
       { workflowId: ids.viewer },
       403,
-      "error.team.agentViewOnly",
+      "error.team.agentManageDenied",
     );
     assert.equal((await runCauseEffect(current().workflows.get(ids.viewer))).revision, revision);
     return { save, start, remove };
+  });
+
+  await step(
+    "chat: the member runs a chat agent's workflow, but a change, a rename or a delete is refused",
+    async () => {
+      const workflow = await hostWorkflow("Chatter", agentGraph(chatter));
+      const save = await refused(
+        WORKFLOWS_ROUTES.saveGraph,
+        member,
+        {
+          workflowId: workflow.id,
+          baseRevision: workflow.revision,
+          graph: { nodes: [promptNode], edges: [], strokes: [] },
+        },
+        403,
+        "error.team.agentManageDenied",
+      );
+      const rename = await refused(
+        WORKFLOWS_ROUTES.rename,
+        member,
+        { workflowId: workflow.id, title: "Renamed" },
+        403,
+        "error.team.agentManageDenied",
+      );
+      const remove = await refused(
+        WORKFLOWS_ROUTES.delete,
+        member,
+        { workflowId: workflow.id },
+        403,
+        "error.team.agentManageDenied",
+      );
+      const started = await ok(WORKFLOWS_ROUTES.startRun, member, { workflowId: workflow.id, requestId: requestId() });
+      const ended = await settled(text(record(started.run, "run").id, "run id"), "agent");
+      assert.equal(ended.status, "done");
+      const kept = await runCauseEffect(current().workflows.get(workflow.id));
+      assert.equal(kept.revision, workflow.revision);
+      assert.equal(kept.summary.title, "Chatter");
+      return { save, rename, remove, run: ended.status };
+    },
+  );
+
+  await step("deleted agent: an owner still sees a workflow whose agent is gone; a member does not", async () => {
+    const workflow = await hostWorkflow("Gone", agentGraph("deleted-agent"));
+    const titles = async (token: string) =>
+      list((await ok(WORKFLOWS_ROUTES.list, token, {})).workflows, "list").map((row) =>
+        text(record(row, "summary").title, "title"),
+      );
+    assert.ok((await titles(ownerToken)).includes("Gone"), "The owner lost the workflow of a deleted agent.");
+    assert.ok(!(await titles(member)).includes("Gone"), "The member sees the workflow of a deleted agent.");
+    await ok(WORKFLOWS_ROUTES.get, ownerToken, { workflowId: workflow.id });
+    const hidden = await refused(
+      WORKFLOWS_ROUTES.get,
+      member,
+      { workflowId: workflow.id },
+      404,
+      "error.workflow.missing",
+    );
+    await ok(WORKFLOWS_ROUTES.delete, ownerToken, { workflowId: workflow.id });
+    return { owner: 200, member: hidden, deleted: 200 };
   });
 
   await step("change: a save that adds the closed agent answers as missing and keeps the graph", async () => {
@@ -869,7 +934,7 @@ try {
       }),
     );
     assert.ok(saved.ok);
-    await setLevels(ownerToken, { [closed]: "none", [viewer]: "view", [later]: "none" });
+    await setLevels(ownerToken, { [closed]: "none", [viewer]: "view", [chatter]: "chat", [later]: "none" });
     const nodesOf = (detail: JsonObject) =>
       list(detail.steps, "steps")
         .map((row) => text(record(row, "step").nodeId, "node id"))
@@ -885,7 +950,16 @@ try {
     assert.equal(ownerStep.error, ended.error, "The owner lost the step error.");
     const page = await ok(WORKFLOWS_ROUTES.runs, member, { workflowId: workflow.id, limit: 10 });
     assert.deepEqual(nodesOf(record(list(page.runs, "runs")[0], "run")), ["prompt"]);
-    return { member: mine, owner: ["agent", "prompt"] };
+    // The current graph has no agent now, but a retry runs the old run's graph and its agent.
+    const retry = await refused(
+      WORKFLOWS_ROUTES.retryStep,
+      member,
+      { stepId: ended.id, requestId: requestId() },
+      404,
+      "error.workflow.stepMissing",
+    );
+    const stop = await refused(WORKFLOWS_ROUTES.stopRun, member, { runId: run.id }, 404, "error.workflow.runMissing");
+    return { member: mine, owner: ["agent", "prompt"], retry, stop };
   });
 
   await step("provider: a model step on a local-only provider answers as missing to a peer", async () => {
