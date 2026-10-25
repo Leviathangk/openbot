@@ -1,6 +1,7 @@
 import {
   type AgentAccessLevel,
   canAdministerServer,
+  graphAgentIds,
   type WorkflowDetail,
   type WorkflowGraph,
   type WorkflowRunDetail,
@@ -17,7 +18,6 @@ import { sourceText } from "@openbot/i18n/source";
 import { RoutineInputError } from "@openbot/team-client/routine-schedule";
 import type { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
-import { graphAgentIds } from "../../backend/workflows/workflow-graph";
 import { WorkflowStoreError } from "../../backend/workflows/workflow-store";
 import {
   parseCreateWorkflow,

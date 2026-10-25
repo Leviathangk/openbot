@@ -5,13 +5,7 @@
  * Stop, Retry and an approval act on.
  */
 
-import type {
-  WorkflowRunDetail,
-  WorkflowRunPage,
-  WorkflowRunStatus,
-  WorkflowStep,
-  WorkflowStepStatus,
-} from "@openbot/contracts/ipc";
+import type { WorkflowRunDetail, WorkflowRunStatus, WorkflowStep, WorkflowStepStatus } from "@openbot/contracts/ipc";
 
 export interface WorkflowRunView {
   /** Newest first. */
@@ -62,39 +56,6 @@ const NODE_STATUS = {
 
 const byStartNewestFirst = (left: { startedAt: string | null }, right: { startedAt: string | null }) =>
   (right.startedAt ?? "").localeCompare(left.startedAt ?? "");
-
-/** The view with a page of runs: the first page replaces the view, a later page adds older runs. */
-export function applyRunPage(view: WorkflowRunView, page: WorkflowRunPage, older: boolean): WorkflowRunView {
-  if (!older) return { runs: page.runs, soloSteps: page.soloSteps, nextBefore: page.nextBefore };
-  const known = new Set(view.runs.map((entry) => entry.run.id));
-  return {
-    runs: [...view.runs, ...page.runs.filter((entry) => !known.has(entry.run.id))],
-    soloSteps: view.soloSteps,
-    nextBefore: page.nextBefore,
-  };
-}
-
-/** The view with the new state of one run. A new run goes first. */
-export function applyRunDetail(view: WorkflowRunView, detail: WorkflowRunDetail): WorkflowRunView {
-  const others = view.runs.filter((entry) => entry.run.id !== detail.run.id);
-  return { ...view, runs: [detail, ...others].sort((left, right) => byStartNewestFirst(left.run, right.run)) };
-}
-
-/** The view with the new state of a step. A step of a run changes that run; one that ran alone, the solo list. */
-export function applyStep(view: WorkflowRunView, step: WorkflowStep): WorkflowRunView {
-  if (step.runId === null) {
-    const others = view.soloSteps.filter((entry) => entry.id !== step.id);
-    return { ...view, soloSteps: [step, ...others].sort(byStartNewestFirst) };
-  }
-  return {
-    ...view,
-    runs: view.runs.map((entry) =>
-      entry.run.id === step.runId
-        ? { ...entry, steps: [...entry.steps.filter((known) => known.id !== step.id), step] }
-        : entry,
-    ),
-  };
-}
 
 /** The newest run that has not ended. */
 export function activeRun(view: WorkflowRunView): WorkflowRunDetail | undefined {

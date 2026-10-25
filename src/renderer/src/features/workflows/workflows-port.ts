@@ -1,5 +1,6 @@
-import type { OpenBotDesktopApi } from "@openbot/contracts/ipc";
+import type { AgentAccessLevels, OpenBotDesktopApi, ServerSummary } from "@openbot/contracts/ipc";
 import type { WorkflowPlace } from "@openbot/ui/features/workflows/workflow-model";
+import { serverRoleCanAdminister } from "../servers/server-capabilities";
 
 type WorkflowsApi = OpenBotDesktopApi["workflows"];
 /** Each method with its input only; `list` takes none. */
@@ -17,15 +18,25 @@ type BoundWorkflowsApi = {
 export interface WorkflowHost {
   /** Called without a server: the host already names one. */
   workflows: BoundWorkflowsApi;
-  /** Calls `changed` with the workflow that changed, or null when the server came back and all can be stale. */
+  /**
+   * Calls `changed` with the workflow that changed, or null when all can be stale: the server came
+   * back, or the agent levels changed.
+   */
   onChanged(changed: (workflowId: string | null) => void): () => void;
   /** Only this computer keeps messaging places; a joined server gives none. */
   places(): Promise<WorkflowPlace[]>;
+  /** The level of this account on each agent that it sees, or null when it manages all of them. */
+  agentLevels(): Promise<AgentAccessLevels | null>;
 }
 
-/** The desktop adapter for one server. `window.openbot` is read on each call: tests and stories replace it per case. */
-export function desktopWorkflowHost(serverId: string, local: boolean): WorkflowHost {
+/**
+ * The desktop adapter for one server. `window.openbot` and `server` are read on each call: tests and
+ * stories replace them per case, and a role can change.
+ */
+export function desktopWorkflowHost(serverId: string, server: () => ServerSummary | undefined): WorkflowHost {
   const api = () => window.openbot.workflows;
+  /** A server that has not loaded yet is this computer, as the page reads it. */
+  const local = () => server()?.kind !== "remote";
   return {
     workflows: {
       list: () => api().list(serverId),
@@ -49,7 +60,9 @@ export function desktopWorkflowHost(serverId: string, local: boolean): WorkflowH
     },
     onChanged(changed) {
       const unsubscribe = window.openbot.agent.onScopedEvent((scoped) => {
-        if (scoped.serverId === serverId && scoped.event.type === "workflows-changed") changed(scoped.event.workflowId);
+        if (scoped.serverId !== serverId) return;
+        if (scoped.event.type === "workflows-changed") changed(scoped.event.workflowId);
+        else if (scoped.event.type === "agent-access-changed") changed(null);
       });
       const reconnect = window.openbot.servers.onEvent((servers) => {
         if (servers.some((server) => server.id === serverId && server.state === "online")) changed(null);
@@ -60,7 +73,7 @@ export function desktopWorkflowHost(serverId: string, local: boolean): WorkflowH
       };
     },
     async places() {
-      if (!local) return [];
+      if (!local()) return [];
       const connections = await window.openbot.routineResults.options();
       return connections.flatMap((connection) =>
         connection.places.map((place) => ({
@@ -69,6 +82,10 @@ export function desktopWorkflowHost(serverId: string, local: boolean): WorkflowH
           label: `${connection.connectionName} · ${place.name}`,
         })),
       );
+    },
+    async agentLevels() {
+      if (local() || serverRoleCanAdminister(server())) return null;
+      return (await window.openbot.hostAdmin.getAgentAccess(serverId)).mine;
     },
   };
 }

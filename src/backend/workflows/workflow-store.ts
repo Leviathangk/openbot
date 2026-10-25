@@ -10,7 +10,10 @@ import {
   isWorkflowEdge,
   isWorkflowGraph,
   isWorkflowNode,
+  nodeAgentId,
   type RoutineSchedule,
+  WORKFLOW_AUTO_VERSION_INTERVAL_MS,
+  WORKFLOW_MAX_VERSIONS,
   WORKFLOW_RUN_STATUSES,
   WORKFLOW_VERSION_KINDS,
   type WorkflowDetail,
@@ -35,7 +38,7 @@ import {
   requiredStringColumn,
 } from "../database/database-rows";
 import type { OpenBotDatabase } from "../openbot-database";
-import { nodeAgentId, nodeTimezone, type WorkflowGraphProblem, workflowGraphProblem } from "./workflow-graph";
+import { nodeTimezone, type WorkflowGraphProblem, workflowGraphProblem } from "./workflow-graph";
 import { workflowTransaction } from "./workflow-transaction";
 
 /**
@@ -56,8 +59,6 @@ const STORED_TRIGGER_KINDS = ["manual", "schedule", "webhook"] as const;
 type StoredTriggerKind = (typeof STORED_TRIGGER_KINDS)[number];
 
 /** A save adds an `auto` version only when the last version is older than this. */
-const AUTO_VERSION_INTERVAL_MS = 5 * 60_000;
-const MAX_VERSIONS = 50;
 
 const PROBLEM_TEXT = {
   annotation: "error.workflow.annotation",
@@ -195,7 +196,7 @@ export class WorkflowStore {
       this.#writeGraph(workflowId, graph, now);
       const next = this.#bumpRevision(workflowId, now);
       const last = this.#lastVersionAt(workflowId);
-      if (last === null || now.getTime() - last >= AUTO_VERSION_INTERVAL_MS)
+      if (last === null || now.getTime() - last >= WORKFLOW_AUTO_VERSION_INTERVAL_MS)
         this.#addVersion(workflowId, next, "auto", graph, now);
       return { ok: true, revision: next };
     });
@@ -483,7 +484,7 @@ export class WorkflowStore {
          SELECT version_id FROM workflow_versions WHERE workflow_id = ?
          ORDER BY created_at DESC, version_id DESC LIMIT ?
        )`,
-    ).run(workflowId, workflowId, MAX_VERSIONS);
+    ).run(workflowId, workflowId, WORKFLOW_MAX_VERSIONS);
   }
 
   #requireDetail(workflowId: string): WorkflowDetail {

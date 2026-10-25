@@ -33,17 +33,6 @@ const PORTS: Record<WorkflowNodeKind, { in: readonly WorkflowPortType[]; out: re
   shape: { in: [], out: [] },
 };
 
-/** The agent of an agent node, or null for another kind or an agent node with no agent yet. */
-export function nodeAgentId(node: WorkflowNode): string | null {
-  const agentId = node.fields.agentId;
-  return node.kind === "agent" && typeof agentId === "string" && agentId.length > 0 ? agentId : null;
-}
-
-/** The agent of each agent node of the graph. */
-export function graphAgentIds(graph: WorkflowGraph): string[] {
-  return graph.nodes.flatMap((node) => nodeAgentId(node) ?? []);
-}
-
 /** The zone that a trigger node names, or null when it names none. */
 export function nodeTimezone(node: WorkflowNode): string | null {
   const timezone = node.fields.timezone;

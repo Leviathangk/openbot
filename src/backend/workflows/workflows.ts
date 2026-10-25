@@ -28,7 +28,9 @@ import {
   type AgentReasoningEffort,
   type CreateWorkflowInput,
   type DecideWorkflowStepInput,
+  graphAgentIds,
   isReasoningEffort,
+  nodeAgentId,
   type QueueDeliveryStatus,
   type RenameWorkflowInput,
   type RetryWorkflowStepInput,
@@ -58,7 +60,6 @@ import { coalescedPasses } from "../coalesced-passes";
 import type { MessagingPostFailure } from "../messaging/messaging-threads";
 import { resultText } from "../routine-results/routine-results";
 import type { ReceivedWebhookEvent } from "../routine-store";
-import { graphAgentIds, nodeAgentId } from "./workflow-graph";
 import {
   isOpenStep,
   publicRun,

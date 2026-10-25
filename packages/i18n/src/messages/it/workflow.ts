@@ -322,4 +322,9 @@ export const messages = {
   "workflow.canvas.deleteUndo.title": "Eliminato: {name}",
   "workflow.canvas.deleteUndo.action": "Annulla",
   "workflow.page.failed": "OpenBot non è riuscito a completare l'operazione. Riprova.",
+  "workflow.page.conflict": "Modificato su un altro dispositivo. Annulla per recuperare le tue modifiche.",
+  "workflow.page.needsNewerApp":
+    "Questo flusso di lavoro ha passaggi di una versione più recente di OpenBot. Aggiorna OpenBot per modificarlo.",
+  "workflow.page.manageOnly":
+    "Per modificare questo flusso di lavoro, ti serve l'accesso Gestione a ciascuno dei suoi agenti.",
 } as const satisfies PartialTranslation<typeof source>;

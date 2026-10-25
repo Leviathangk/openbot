@@ -5,7 +5,10 @@
 
 import {
   isWorkflowStepKind,
+  nodeAgentId,
   type OpenBotDesktopApi,
+  WORKFLOW_AUTO_VERSION_INTERVAL_MS,
+  WORKFLOW_MAX_VERSIONS,
   type WorkflowDetail,
   type WorkflowGraph,
   type WorkflowNode,
@@ -49,7 +52,6 @@ interface MockWorkflowRecord {
   versions: (WorkflowVersion & { graph: WorkflowGraph })[];
 }
 
-const MAX_VERSIONS = 50;
 const STEP_MS = 900;
 const OPEN_STEPS: readonly WorkflowStep["status"][] = ["running", "approval"];
 
@@ -96,7 +98,7 @@ export function mockWorkflows(
   const summaryOf = (id: string, title: string, graph: WorkflowGraph, updatedAt: string): WorkflowSummary => ({
     id,
     title,
-    steps: graph.nodes.filter((node) => node.kind !== "text" && node.kind !== "note" && node.kind !== "shape").length,
+    steps: graph.nodes.filter((node) => isWorkflowStepKind(node.kind)).length,
     updatedAt,
     lastRun: null,
   });
@@ -119,7 +121,7 @@ export function mockWorkflows(
   const addVersion = (id: string, kind: WorkflowVersion["kind"]) => {
     const { detail, versions } = record(id);
     versions.unshift({ id: crypto.randomUUID(), at: stamp(), kind, revision: detail.revision, graph: detail.graph });
-    versions.splice(MAX_VERSIONS);
+    versions.splice(WORKFLOW_MAX_VERSIONS);
   };
   for (const seed of seeds) put(seed.id, seed.title, seed.graph, 0, seed.updatedAt);
 
@@ -158,7 +160,7 @@ export function mockWorkflows(
       runId,
       nodeId: node.id,
       attempt,
-      agentId: node.kind === "agent" && typeof node.fields.agentId === "string" ? node.fields.agentId : null,
+      agentId: nodeAgentId(node),
       status: "running",
       output: null,
       branch: null,
@@ -305,7 +307,8 @@ export function mockWorkflows(
       if (detail.revision !== input.baseRevision) return { ok: false, conflict: structuredClone(detail) };
       put(input.workflowId, detail.summary.title, input.graph, detail.revision + 1);
       const last = versions[0];
-      if (!last || Date.now() - Date.parse(last.at) >= 5 * 60_000) addVersion(input.workflowId, "auto");
+      if (!last || Date.now() - Date.parse(last.at) >= WORKFLOW_AUTO_VERSION_INTERVAL_MS)
+        addVersion(input.workflowId, "auto");
       emit(input.workflowId);
       return { ok: true, revision: detail.revision + 1 };
     },

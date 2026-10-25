@@ -166,8 +166,8 @@ export interface WorkflowCanvasProps {
   /** The open workflow. The canvas reads its graph only when it opens, or when `resetKey` changes. */
   workflow: WorkflowDetail;
   /**
-   * A new value loads `workflow.graph` again and clears the local state and the undo history, as after
-   * a restore or a change from another device. A save of the changes of this canvas must not change it.
+   * A new value loads `workflow.graph` again, as after a restore or a change from another device. Undo
+   * then puts back the canvas from before. A save of the changes of this canvas must not change it.
    */
   resetKey?: number | undefined;
   runs: WorkflowRunView;
@@ -195,7 +195,7 @@ export interface WorkflowCanvasProps {
   onStopRun: (runId: string) => void;
   onRetry: (stepId: string) => void;
   /** Sends the answer of an approval. A promise that rejects shows the approval again. */
-  onDecide: (stepId: string, approved: boolean) => void | Promise<unknown>;
+  onDecide: (stepId: string, approved: boolean) => Promise<unknown>;
   /**
    * Makes a new signing secret for a webhook trigger, after the graph that has the trigger is saved.
    * The first secret also makes the address. Without it, a webhook trigger offers no secret.
@@ -208,8 +208,8 @@ export interface WorkflowCanvasProps {
   onSelect: (workflowId: string) => void;
   onCreate: (input: { title: string; graph?: WorkflowGraph }) => void;
   onRename: (workflowId: string, title: string) => void;
-  /** Runs when the Undo toast of a delete closes without Undo. */
-  onDelete: (workflowId: string) => void;
+  /** Runs when the Undo toast of a delete closes without Undo. A promise that rejects shows the workflow again. */
+  onDelete: (workflowId: string) => Promise<unknown>;
 }
 
 /** What a right-click hit. The canvas keeps the world point, so a new node opens there. */
@@ -868,7 +868,9 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       },
       onKeep: () => {
         closeDelete = undefined;
-        props.onDelete(id);
+        props.onDelete(id).catch(() => {
+          if (props.workflow.summary.id === id) setDeleted(false);
+        });
       },
     });
   };
@@ -972,8 +974,12 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     },
   );
 
-  /** Loads a graph from the host, as when the canvas opens. */
-  const reset = (next: WorkflowGraph) => {
+  /**
+   * Loads a graph from the host, as when the canvas opens. For the same workflow, the canvas from
+   * before goes on the undo stack, so undo gets back edits that another device replaced.
+   */
+  const reset = (next: WorkflowGraph, same: boolean) => {
+    const before = same ? (liveCanvas ?? capture()) : undefined;
     const snapshot = snapshotFromGraph(next);
     savedGraph = savedJson(next);
     liveCanvas = undefined;
@@ -986,7 +992,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     putPlaces(snapshot);
     canvas.restore(snapshot.board);
     setStrokes(snapshot.strokes);
-    edits.clear();
+    if (!before) edits.clear();
+    else if (stableJson(graphFromSnapshot(before)) !== savedGraph) edits.push(before);
     board.view(null);
     cameraMoved = false;
     requestAnimationFrame(() => {
@@ -998,13 +1005,12 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   // The memo stops a new `workflow` object with the same id and key: an effect runs on each change of
   // what its compute function reads, even when the value is the same.
   const resetToken = createMemo(() => `${props.workflow.summary.id}\u0000${props.resetKey ?? ""}`);
-  let opened = false;
+  let openedId: string | undefined;
   createEffect(resetToken, () => {
-    if (!opened) {
-      opened = true;
-      return;
-    }
-    untrack(() => reset(props.workflow.graph));
+    const id = untrack(() => props.workflow.summary.id);
+    const before = openedId;
+    openedId = id;
+    if (before !== undefined) untrack(() => reset(props.workflow.graph, before === id));
   });
   // The host opens another workflow when a delete is kept, so the canvas shows again. A switch while
   // the Undo toast is open keeps that delete.

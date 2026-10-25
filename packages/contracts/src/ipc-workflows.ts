@@ -110,6 +110,17 @@ export interface WorkflowGraph {
   strokes: WorkflowStroke[];
 }
 
+/** The agent of an agent node, or null for another kind or an agent node with no agent yet. */
+export function nodeAgentId(node: WorkflowNode): string | null {
+  const agentId = node.fields.agentId;
+  return node.kind === "agent" && typeof agentId === "string" && agentId.length > 0 ? agentId : null;
+}
+
+/** The agent of each agent node of the graph. */
+export function graphAgentIds(graph: WorkflowGraph): string[] {
+  return graph.nodes.flatMap((node) => nodeAgentId(node) ?? []);
+}
+
 export const WORKFLOW_RUN_STATUSES = ["running", "approval", "stopping", "done", "failed", "stopped"] as const;
 export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
 
@@ -121,6 +132,10 @@ export type WorkflowRunSource = (typeof WORKFLOW_RUN_SOURCES)[number];
 
 export const WORKFLOW_VERSION_KINDS = ["auto", "restore", "run"] as const;
 export type WorkflowVersionKind = (typeof WORKFLOW_VERSION_KINDS)[number];
+/** A save adds an `auto` version when the newest version is older than this. */
+export const WORKFLOW_AUTO_VERSION_INTERVAL_MS = 5 * 60_000;
+/** The versions that a workflow keeps. A new version removes the oldest. */
+export const WORKFLOW_MAX_VERSIONS = 50;
 
 export interface WorkflowSummary {
   id: string;
