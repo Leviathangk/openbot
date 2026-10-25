@@ -27,6 +27,7 @@ import { type DynamicRecord, isOneOf } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { Schema } from "effect";
 import {
+  checkedColumn,
   databaseRow,
   databaseRows,
   optionalStringColumn,
@@ -34,7 +35,7 @@ import {
   requiredStringColumn,
 } from "../database/database-rows";
 import type { OpenBotDatabase } from "../openbot-database";
-import { type WorkflowGraphProblem, workflowGraphProblem } from "./workflow-graph";
+import { nodeAgentId, nodeTimezone, type WorkflowGraphProblem, workflowGraphProblem } from "./workflow-graph";
 import { workflowTransaction } from "./workflow-transaction";
 
 /**
@@ -338,7 +339,7 @@ export class WorkflowStore {
         .all(workflowId),
     ).map((row) => ({
       nodeId: requiredStringColumn(row, "node_id"),
-      type: storedTriggerKind(row.kind),
+      type: checkedColumn(row, "kind", STORED_TRIGGER_KINDS),
       nextDueAt: optionalStringColumn(row, "next_due_at"),
       webhookUrl: optionalStringColumn(row, "url"),
     }));
@@ -431,7 +432,7 @@ export class WorkflowStore {
          schedule_json = excluded.schedule_json, next_due_at = excluded.next_due_at, updated_at = excluded.updated_at`,
     );
     for (const [nodeId, { node, kind }] of desired) {
-      const timezone = typeof node.fields.timezone === "string" && node.fields.timezone ? node.fields.timezone : null;
+      const timezone = nodeTimezone(node);
       const scheduleJson = kind === "schedule" && node.schedule ? JSON.stringify(node.schedule) : null;
       const before = previous.get(nodeId);
       // An unchanged trigger keeps its next occurrence; only a changed one is planned again.
@@ -521,16 +522,6 @@ function triggerKind(node: WorkflowNode): StoredTriggerKind | null {
   return isOneOf(STORED_TRIGGER_KINDS, value) ? value : null;
 }
 
-function storedTriggerKind(value: unknown): StoredTriggerKind {
-  // The CHECK constraint holds the column to these values; the guard only narrows the type.
-  return isOneOf(STORED_TRIGGER_KINDS, value) ? value : "manual";
-}
-
-function nodeAgentId(node: WorkflowNode): string | null {
-  const agentId = node.fields.agentId;
-  return node.kind === "agent" && typeof agentId === "string" && agentId.length > 0 ? agentId : null;
-}
-
 function storedGraph(json: string): WorkflowGraph {
   const graph = JSON.parse(json);
   if (!isWorkflowGraph(graph)) throw new Error("The stored workflow graph is invalid.");
@@ -611,12 +602,10 @@ function toSummary(row: DynamicRecord): WorkflowSummary {
 }
 
 function toVersion(row: DynamicRecord): WorkflowVersion {
-  const kind = row.kind;
   return {
     id: requiredStringColumn(row, "version_id"),
     at: requiredStringColumn(row, "created_at"),
-    // The CHECK constraint holds the column to these values; the guard only narrows the type.
-    kind: isOneOf(WORKFLOW_VERSION_KINDS, kind) ? kind : "auto",
+    kind: checkedColumn(row, "kind", WORKFLOW_VERSION_KINDS),
     revision: requiredNumberColumn(row, "graph_revision"),
   };
 }

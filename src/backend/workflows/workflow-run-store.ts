@@ -23,13 +23,16 @@ import {
 } from "@openbot/contracts/ipc";
 import { type DynamicRecord, isOneOf } from "@openbot/contracts/runtime-values";
 import {
+  checkedColumn,
   databaseRow,
   databaseRows,
   optionalStringColumn,
+  placeholders,
   requiredNumberColumn,
   requiredStringColumn,
 } from "../database/database-rows";
 import type { OpenBotDatabase } from "../openbot-database";
+import { webhookReceiptCutoff } from "../webhook-route-store";
 import { workflowTransaction } from "./workflow-transaction";
 
 /** A run as the runtime reads it: the public row and the graph it started from. */
@@ -55,8 +58,6 @@ export function isOpenStep(step: Pick<WorkflowStep, "status">): boolean {
   return isOneOf(OPEN_STEP_STATUSES, step.status);
 }
 const OPEN_RUN_STATUSES = ["running", "approval", "stopping"] as const satisfies readonly WorkflowRunStatus[];
-/** How long a received delivery ID counts, like the receipts of routine webhooks. */
-const WEBHOOK_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** One delivery that a webhook trigger received: the run it started, or why it started none. */
 export interface WorkflowWebhookReceipt {
@@ -192,7 +193,7 @@ export class WorkflowRunStore {
             `SELECT 1 AS found FROM workflow_webhook_receipts
              WHERE workflow_id = ? AND node_id = ? AND delivery_id = ? AND received_at >= ?`,
           )
-          .get(receipt.workflowId, receipt.nodeId, receipt.deliveryId, receiptCutoff(receipt.receivedAt)),
+          .get(receipt.workflowId, receipt.nodeId, receipt.deliveryId, webhookReceiptCutoff(receipt.receivedAt)),
       ) !== null
     );
   }
@@ -201,7 +202,9 @@ export class WorkflowRunStore {
   addWebhookReceipt(receipt: WorkflowWebhookReceipt): void {
     this.#transaction(() => {
       const db = this.#database.connection;
-      db.prepare("DELETE FROM workflow_webhook_receipts WHERE received_at < ?").run(receiptCutoff(receipt.receivedAt));
+      db.prepare("DELETE FROM workflow_webhook_receipts WHERE received_at < ?").run(
+        webhookReceiptCutoff(receipt.receivedAt),
+      );
       db.prepare(
         `INSERT INTO workflow_webhook_receipts (receipt_id, workflow_id, node_id, delivery_id, status, reason, run_id,
            received_at)
@@ -541,13 +544,7 @@ const STEP_SELECT = `
     branch, error, started_at, ended_at, created_at
   FROM workflow_steps`;
 
-function placeholders(values: readonly string[]): string {
-  return values.map(() => "?").join(", ");
-}
-
 function toRun(row: DynamicRecord): StoredWorkflowRun {
-  const source = row.source;
-  const status = row.status;
   const graph = JSON.parse(requiredStringColumn(row, "graph_json"));
   if (!isWorkflowGraph(graph)) throw new Error("Invalid SQLite column: workflow_runs.graph_json");
   return {
@@ -556,9 +553,8 @@ function toRun(row: DynamicRecord): StoredWorkflowRun {
     number: requiredNumberColumn(row, "number"),
     triggerNodeId: optionalStringColumn(row, "trigger_node_id"),
     fromNodeId: optionalStringColumn(row, "from_node_id"),
-    // The CHECK constraints hold these columns to the values; the guards only narrow the types.
-    source: isOneOf(WORKFLOW_RUN_SOURCES, source) ? source : "manual",
-    status: isOneOf(WORKFLOW_RUN_STATUSES, status) ? status : "failed",
+    source: checkedColumn(row, "source", WORKFLOW_RUN_SOURCES),
+    status: checkedColumn(row, "status", WORKFLOW_RUN_STATUSES),
     error: optionalStringColumn(row, "error"),
     startedAt: requiredStringColumn(row, "started_at"),
     endedAt: optionalStringColumn(row, "ended_at"),
@@ -569,19 +565,16 @@ function toRun(row: DynamicRecord): StoredWorkflowRun {
 }
 
 function toStep(row: DynamicRecord): StoredWorkflowStep {
-  const status = row.status;
   const branch = row.branch;
-  const kind = row.kind;
-  if (!isOneOf(WORKFLOW_NODE_KINDS, kind)) throw new Error("Invalid SQLite column: workflow_steps.kind");
   return {
     id: requiredStringColumn(row, "step_id"),
     workflowId: requiredStringColumn(row, "workflow_id"),
     runId: optionalStringColumn(row, "run_id"),
     nodeId: requiredStringColumn(row, "node_id"),
     attempt: requiredNumberColumn(row, "attempt"),
-    kind,
+    kind: checkedColumn(row, "kind", WORKFLOW_NODE_KINDS),
     agentId: optionalStringColumn(row, "agent_id"),
-    status: isOneOf(WORKFLOW_STEP_STATUSES, status) ? status : "failed",
+    status: checkedColumn(row, "status", WORKFLOW_STEP_STATUSES),
     deliveryId: optionalStringColumn(row, "delivery_id"),
     turnId: optionalStringColumn(row, "turn_id"),
     input: requiredStringColumn(row, "input"),
@@ -600,12 +593,7 @@ function toOutput(row: DynamicRecord): WorkflowOutputDelivery {
     connectionId: requiredStringColumn(row, "connection_id"),
     placeId: requiredStringColumn(row, "place_id"),
     text: requiredStringColumn(row, "text"),
-    // The CHECK constraint holds the column to these values.
-    status: isOneOf(OUTPUT_STATUSES, row.status) ? row.status : "uncertain",
+    status: checkedColumn(row, "status", OUTPUT_STATUSES),
     reason: optionalStringColumn(row, "reason"),
   };
-}
-
-function receiptCutoff(receivedAt: string): string {
-  return new Date(Date.parse(receivedAt) - WEBHOOK_RECEIPT_RETENTION_MS).toISOString();
 }

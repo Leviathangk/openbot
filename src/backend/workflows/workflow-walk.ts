@@ -140,15 +140,23 @@ function graphOrder(graph: WorkflowGraph, scope: ReadonlySet<string>): string[] 
   return order;
 }
 
+/** The edges by the node they leave. */
 function outgoing(edges: readonly WorkflowEdge[]): Map<string, WorkflowEdge[]> {
-  const map = new Map<string, WorkflowEdge[]>();
-  for (const edge of edges) map.set(edge.from, [...(map.get(edge.from) ?? []), edge]);
-  return map;
+  return edgesBy(edges, "from");
 }
 
+/** The edges by the node they enter. */
 function incoming(edges: readonly WorkflowEdge[]): Map<string, WorkflowEdge[]> {
+  return edgesBy(edges, "to");
+}
+
+function edgesBy(edges: readonly WorkflowEdge[], end: "from" | "to"): Map<string, WorkflowEdge[]> {
   const map = new Map<string, WorkflowEdge[]>();
-  for (const edge of edges) map.set(edge.to, [...(map.get(edge.to) ?? []), edge]);
+  for (const edge of edges) {
+    const list = map.get(edge[end]);
+    if (list) list.push(edge);
+    else map.set(edge[end], [edge]);
+  }
   return map;
 }
 

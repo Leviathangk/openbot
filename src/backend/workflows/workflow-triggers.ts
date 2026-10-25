@@ -22,6 +22,7 @@ import {
 import { Effect } from "effect";
 import type { ReceivedWebhookEvent } from "../routine-store";
 import type { RoutineDueSource } from "../routine-timer";
+import { nodeTimezone } from "./workflow-graph";
 import type { DueWorkflowTrigger, WorkflowStore } from "./workflow-store";
 
 const logger = createOpenBotLogger("workflow-triggers");
@@ -137,7 +138,7 @@ export function prepareWorkflowSchedules(graph: WorkflowGraph, timezone: string,
     ...graph,
     nodes: graph.nodes.map((node) => {
       if (!node.schedule) return node;
-      const zone = typeof node.fields.timezone === "string" && node.fields.timezone ? node.fields.timezone : timezone;
+      const zone = nodeTimezone(node) ?? timezone;
       const schedule = normalizeRoutineSchedule(node.schedule, now);
       validateRoutineSchedule(schedule, zone);
       return { ...node, schedule };

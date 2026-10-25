@@ -16,6 +16,7 @@ import { sourceText } from "@openbot/i18n/source";
 import { RoutineInputError } from "@openbot/team-client/routine-schedule";
 import { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
+import { graphAgentIds } from "../../backend/workflows/workflow-graph";
 import { WorkflowStoreError } from "../../backend/workflows/workflow-store";
 import { HostEventsFailure, hostEventsFailureMessage } from "../host-events-api";
 import {
@@ -76,15 +77,6 @@ async function runEvents<A>(operation: Effect.Effect<A, HostEventsFailure>): Pro
   }
 }
 
-/** The agents that the agent steps of a graph send their tasks to. */
-function graphAgents(graph: WorkflowGraph): string[] {
-  return graph.nodes.flatMap((node) =>
-    node.kind === "agent" && typeof node.fields.agentId === "string" && node.fields.agentId
-      ? [node.fields.agentId]
-      : [],
-  );
-}
-
 /** The messaging place of each output node that posts to one, by node. */
 function placeOutputs(graph: WorkflowGraph): Map<string, string> {
   const places = new Map<string, string>();
@@ -128,12 +120,12 @@ export async function routeWorkflows(
   const listed = () => new Set(agents.listAgents().map((agent) => agent.id));
 
   const visibleGraph = (graph: WorkflowGraph, known: ReadonlySet<string>) =>
-    graphAgents(graph).every((agentId) => !hiddenAgentIds.has(agentId) && known.has(agentId)) &&
+    graphAgentIds(graph).every((agentId) => !hiddenAgentIds.has(agentId) && known.has(agentId)) &&
     graph.nodes.every((node) => !isPeerHiddenProvider(node.fields.provider, protocol));
   /** A graph that the member can read, change and run, or a 404 as for a missing workflow. */
   const requireUsable = (graph: WorkflowGraph) => {
     if (!visibleGraph(graph, listed())) workflowMissing();
-    for (const agentId of graphAgents(graph)) requireAgentLevel(context, agentId, "chat");
+    for (const agentId of graphAgentIds(graph)) requireAgentLevel(context, agentId, "chat");
   };
   const requireChange = (before: WorkflowGraph, after: WorkflowGraph) => {
     requireUsable(before);

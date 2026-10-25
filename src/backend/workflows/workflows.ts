@@ -54,8 +54,11 @@ import { createOpenBotLogger } from "@openbot/logging";
 import { Cause, Context, Effect, Exit, Fiber, Layer, ManagedRuntime, Result, Schema, Scope, Semaphore } from "effect";
 import { isNoUpdateAnswer } from "../agent/routine-quiet-runs";
 import type { AgentProvider } from "../agent-client";
+import { coalescedPasses } from "../coalesced-passes";
 import type { MessagingPostFailure } from "../messaging/messaging-threads";
+import { resultText } from "../routine-results/routine-results";
 import type { ReceivedWebhookEvent } from "../routine-store";
+import { nodeAgentId } from "./workflow-graph";
 import {
   isOpenStep,
   publicRun,
@@ -223,8 +226,6 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         const now = () => (dependencies.now ?? (() => new Date()))();
         /** The model steps that generate and the posts on their way, by step. */
         const working = new Map<string, Fiber.Fiber<void>>();
-        let sweeping = false;
-        let again = false;
 
         const attempt = <A>(work: () => A) =>
           Effect.try({ try: work, catch: (cause) => new WorkflowFailed({ cause }) });
@@ -405,7 +406,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             return Effect.void;
           }
           runs.addOutput(
-            { stepId: step.id, connectionId, placeId, text: outputText(titleOf(step.workflowId), step.input) },
+            { stepId: step.id, connectionId, placeId, text: resultText(titleOf(step.workflowId), step.input) },
             now(),
           );
           const output = runs.output(step.id);
@@ -555,7 +556,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                     nodeId: node.id,
                     kind: node.kind,
                     requestId: `${run.id}:${node.id}:${(latest.get(node.id)?.attempt ?? 0) + 1}`,
-                    agentId: node.kind === "agent" ? fieldText(node, "agentId") || null : null,
+                    agentId: nodeAgentId(node),
                     status: action.action === "skip" ? "skipped" : "running",
                     input: action.action === "skip" ? "" : stepInput(node, run.workflowId, action.inputs),
                   },
@@ -625,34 +626,14 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           for (const runId of runIds) yield* advance(runId);
         });
 
-        /** Runs passes until none was asked for during the last one. A second call only asks again. */
-        const sweep = (): Effect.Effect<void> =>
-          Effect.suspend(() => {
-            if (sweeping) {
-              again = true;
-              return Effect.void;
-            }
-            sweeping = true;
-            return Effect.gen(function* () {
-              do {
-                again = false;
-                yield* lock
-                  .withPermit(sweepOnce())
-                  .pipe(
-                    Effect.catchCause((cause) =>
-                      Effect.sync(() => logger.warn("A workflow sweep failed.", { cause: String(cause) })),
-                    ),
-                  );
-              } while (again);
-            }).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  sweeping = false;
-                }),
-              ),
-              Effect.withSpan("Workflows.sweep"),
-            );
-          });
+        const sweep = coalescedPasses(() =>
+          lock.withPermit(sweepOnce()).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => logger.warn("A workflow sweep failed.", { cause: String(cause) })),
+            ),
+            Effect.withSpan("Workflows.sweep"),
+          ),
+        );
 
         const notice = Effect.fn("Workflows.notice")(function* (event: AgentEvent) {
           // A deleted agent leaves the steps it was answering without an answer.
@@ -905,7 +886,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                     nodeId: node.id,
                     kind: node.kind,
                     requestId: input.requestId,
-                    agentId: node.kind === "agent" ? fieldText(node, "agentId") || null : null,
+                    agentId: nodeAgentId(node),
                     status: "running",
                     input: stepInput(node, input.workflowId, inputs),
                   },
@@ -1071,10 +1052,6 @@ export const createWorkflows = Effect.fn("createWorkflows")(function* (dependenc
 });
 
 /** What the place gets: the workflow's name over the text. Both are the user's and the agents' own. */
-function outputText(workflowTitle: string, text: string): string {
-  return workflowTitle ? `**${workflowTitle}**\n\n${text}` : text;
-}
-
 /** The sentence for a post that did not end as sent, from its failure or its kept reason. */
 function outputError(reason: string | null): string {
   switch (reason) {
