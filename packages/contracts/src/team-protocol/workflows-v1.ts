@@ -72,6 +72,8 @@ export function workflowsEvent(value: unknown): WorkflowsEvent | null {
 }
 
 const timestamp = string(64);
+/** `<started at>|<run id>` of the last run of a page; see `WorkflowRunStore.page`. */
+const runCursor = string(64);
 const stepText = string(WORKFLOW_STEP_TEXT_LIMIT);
 const title: AdminDecoder = (value) => {
   if (!isString(value) || !value.trim().length || value.length > 160) throw new Error("Invalid workflow title.");
@@ -201,7 +203,7 @@ const runDetail = fields({ run, steps: list(step, WORKFLOW_RUN_STEP_LIMIT) });
 const runPage = fields({
   runs: list(runDetail, 50),
   soloSteps: list(step, 50),
-  nextBefore: nullable(timestamp),
+  nextBefore: nullable(runCursor),
 });
 const workflowRef = fields({ workflowId: identifier });
 const secret: AdminDecoder = (value) => {
@@ -230,7 +232,7 @@ export const WORKFLOWS_CODECS: ReadonlyMap<string, OptionalRouteCodec> = new Map
   [WORKFLOWS_ROUTES.stopRun, adminRoute(fields({ runId: identifier }), empty)],
   [WORKFLOWS_ROUTES.retryStep, adminRoute(fields({ stepId: identifier, requestId: identifier }), step)],
   [WORKFLOWS_ROUTES.decide, adminRoute(fields({ stepId: identifier, approved: boolean }), empty)],
-  [WORKFLOWS_ROUTES.runs, adminRoute(fields({ workflowId: identifier, limit: count }, { before: timestamp }), runPage)],
+  [WORKFLOWS_ROUTES.runs, adminRoute(fields({ workflowId: identifier, limit: count }, { before: runCursor }), runPage)],
   [WORKFLOWS_ROUTES.run, adminRoute(fields({ runId: identifier }), runDetail)],
   [
     WORKFLOWS_ROUTES.rotateWebhookSecret,

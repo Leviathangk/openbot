@@ -30,6 +30,7 @@ import {
   requiredStringColumn,
 } from "../database/database-rows";
 import type { OpenBotDatabase } from "../openbot-database";
+import { workflowTransaction } from "./workflow-transaction";
 
 /** A run as the runtime reads it: the public row and the graph it started from. */
 export interface StoredWorkflowRun extends WorkflowRun {
@@ -126,8 +127,15 @@ export class WorkflowRunStore {
     this.#createId = options.createId ?? (() => crypto.randomUUID());
   }
 
-  /** Starts a run, or answers the run that the same key already started. */
-  startRun(input: NewWorkflowRun, now = new Date()): { run: StoredWorkflowRun; created: boolean } {
+  /**
+   * Starts a run, or answers the run that the same key already started. `created` writes what belongs
+   * to a new run, such as its version and its first steps, in the same transaction.
+   */
+  startRun(
+    input: NewWorkflowRun,
+    now = new Date(),
+    created: (run: StoredWorkflowRun) => void = () => {},
+  ): { run: StoredWorkflowRun; created: boolean } {
     return this.#transaction(() => {
       const db = this.#database.connection;
       const existing = databaseRow(
@@ -170,6 +178,7 @@ export class WorkflowRunStore {
       );
       const run = this.run(runId);
       if (!run) throw new Error("A new workflow run was not stored.");
+      created(run);
       return { run, created: true };
     });
   }
@@ -438,21 +447,28 @@ export class WorkflowRunStore {
       .run(status, reason, status === "sent" ? at : null, at, stepId);
   }
 
-  /** Runs newest first, before `before` when given, and on the first page the newest steps alone. */
+  /**
+   * Runs newest first, after the `before` cursor of the page before when given, and on the first page
+   * the newest steps alone. The cursor is `<started at>|<run id>`, so runs that started in the same
+   * millisecond are not skipped.
+   */
   page(workflowId: string, before: string | undefined, limit: number): WorkflowRunPage {
     const db = this.#database.connection;
+    const cursor = before === undefined ? null : runCursor(before);
     const rows = databaseRows(
-      before === undefined
+      cursor === null
         ? db
             .prepare(`${RUN_SELECT} WHERE workflow_id = ? ORDER BY started_at DESC, run_id DESC LIMIT ?`)
             .all(workflowId, limit + 1)
         : db
             .prepare(
-              `${RUN_SELECT} WHERE workflow_id = ? AND started_at < ? ORDER BY started_at DESC, run_id DESC LIMIT ?`,
+              `${RUN_SELECT} WHERE workflow_id = ? AND (started_at < ? OR (started_at = ? AND run_id < ?))
+               ORDER BY started_at DESC, run_id DESC LIMIT ?`,
             )
-            .all(workflowId, before, limit + 1),
+            .all(workflowId, cursor.startedAt, cursor.startedAt, cursor.runId, limit + 1),
     ).map(toRun);
     const runs = rows.slice(0, limit);
+    const last = runs.at(-1);
     const soloSteps =
       before === undefined
         ? databaseRows(
@@ -466,23 +482,20 @@ export class WorkflowRunStore {
     return {
       runs: runs.map((run) => ({ run: publicRun(run), steps: this.steps(run.id).map(publicStep) })),
       soloSteps: soloSteps.map(publicStep),
-      nextBefore: rows.length > limit ? (runs.at(-1)?.startedAt ?? null) : null,
+      nextBefore: rows.length > limit && last ? `${last.startedAt}|${last.id}` : null,
     };
   }
 
   #transaction<T>(work: () => T): T {
-    const db = this.#database.connection;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = work();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      // SQLite may have rolled back already, and a second ROLLBACK would replace the error that did it.
-      if (db.isTransaction) db.exec("ROLLBACK");
-      throw error;
-    }
+    return workflowTransaction(this.#database, work);
   }
+}
+
+/** The start and the id of the last run of a page. */
+function runCursor(before: string): { startedAt: string; runId: string } {
+  const bar = before.lastIndexOf("|");
+  // A time alone has no id: no run id is less than the empty string, so the page starts before that time.
+  return bar < 0 ? { startedAt: before, runId: "" } : { startedAt: before.slice(0, bar), runId: before.slice(bar + 1) };
 }
 
 /** The public part of a run, as IPC and the Team API carry it. */

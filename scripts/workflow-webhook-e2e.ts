@@ -116,6 +116,7 @@ try {
       connectionOn: () => false,
       post: () => Effect.die(new Error("No output posts in this test.")),
       changed: () => {},
+      rearm: () => {},
       timezone: () => "UTC",
     }),
   );

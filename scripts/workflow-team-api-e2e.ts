@@ -258,6 +258,7 @@ async function startHost(): Promise<Host> {
       post: () => Effect.succeed({ posted: true as const }),
       // As the app does: an agent event, so the member's socket hears it.
       changed: (workflowId) => agents.notifyWorkflowsChanged(workflowId),
+      rearm: () => {},
       timezone: () => "UTC",
     }),
   );

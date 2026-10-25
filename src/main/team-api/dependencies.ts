@@ -264,6 +264,7 @@ export type TeamApiRoutineFlows = Pick<
 export type TeamApiWorkflows = Pick<
   WorkflowsHandle,
   | "list"
+  | "listWithGraphs"
   | "get"
   | "create"
   | "rename"

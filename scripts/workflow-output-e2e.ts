@@ -84,6 +84,7 @@ async function open() {
           return Effect.succeed(answer === "posted" ? { posted: true as const } : { failure: answer });
         }),
       changed: () => {},
+      rearm: () => {},
       timezone: () => "UTC",
     }),
   );

@@ -1670,8 +1670,20 @@ export async function createApplicationServices({
     // `host` is built later, after the agent service; a channel tool reads it when it runs.
     channelPersonAgentLevel: (personId, agentId) => host.channelPersonAgentLevel(personId, agentId),
     channelRemotePerson: (personId) => host.channelPersonIsRemote(personId),
+    // The delete also clears the agent from workflow nodes, so the editors of those workflows load
+    // the new graph. `workflowStore` is built later, after the agent service.
     deleteWithRevokedApproval: (agentId, remove) =>
-      approvalAutomation.deleteAgent(agentId, remove).pipe(toAgentRemovalFailed),
+      Effect.suspend(() => {
+        const workflowIds = workflowStore.workflowsOfAgent(agentId);
+        return approvalAutomation.deleteAgent(agentId, remove).pipe(
+          toAgentRemovalFailed,
+          Effect.tap(() =>
+            Effect.sync(() => {
+              for (const workflowId of workflowIds) service.notifyWorkflowsChanged(workflowId);
+            }),
+          ),
+        );
+      }),
     tables,
   });
   teardown.push(TEARDOWN_ORDER.service, "the agent service", () => runCauseEffect(service.stop()));
@@ -1753,12 +1765,9 @@ export async function createApplicationServices({
       notify: forwardWorkflowNotice,
       connectionOn: (connectionId) => service.messaging.store.connection(connectionId)?.enabled === true,
       post: (connectionId, placeId, markdown) => service.messaging.deliver(connectionId, placeId, markdown),
-      // An agent event, so this window, joined clients and the web app hear it the same way. A save
-      // can move a schedule trigger, so the routine timer plans again.
-      changed: (workflowId) => {
-        service.notifyWorkflowsChanged(workflowId);
-        service.armRoutines();
-      },
+      // An agent event, so this window, joined clients and the web app hear it the same way.
+      changed: (workflowId) => service.notifyWorkflowsChanged(workflowId),
+      rearm: () => service.armRoutines(),
       timezone: () => serverTimezone.effective(),
     }),
   );

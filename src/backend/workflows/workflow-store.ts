@@ -25,6 +25,7 @@ import {
 } from "@openbot/contracts/ipc";
 import { type DynamicRecord, isOneOf } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
+import { Schema } from "effect";
 import {
   databaseRow,
   databaseRows,
@@ -34,9 +35,20 @@ import {
 } from "../database/database-rows";
 import type { OpenBotDatabase } from "../openbot-database";
 import { type WorkflowGraphProblem, workflowGraphProblem } from "./workflow-graph";
+import { workflowTransaction } from "./workflow-transaction";
 
-/** A refusal the user reads: the text is already a sentence for them. */
-export class WorkflowStoreError extends Error {}
+/**
+ * A refusal the user reads: the message is already a sentence for them. `missing` says there is no
+ * such workflow, version, run, step or node, so a client shows it as gone.
+ */
+export class WorkflowStoreError extends Schema.TaggedError<WorkflowStoreError>()("WorkflowStoreError", {
+  code: Schema.Literals(["missing", "refused"]),
+  message: Schema.String,
+}) {}
+
+/** The open runs that hold a workflow's schedule triggers: an occurrence waits until the run ends. */
+const NO_OPEN_RUN = `NOT EXISTS (SELECT 1 FROM workflow_runs AS r WHERE r.workflow_id = t.workflow_id
+  AND r.status IN ('running', 'approval', 'stopping'))`;
 
 /** The trigger kinds that have a row: a `message` trigger does not run in this version. */
 const STORED_TRIGGER_KINDS = ["manual", "schedule", "webhook"] as const;
@@ -87,6 +99,38 @@ export class WorkflowStore {
     return databaseRows(
       this.#database.connection.prepare(`${SUMMARY_SELECT} ORDER BY w.updated_at DESC, w.workflow_id`).all(),
     ).map(toSummary);
+  }
+
+  /** Every workflow with its graph, in the order of `list`, in three reads. */
+  listWithGraphs(): { summary: WorkflowSummary; graph: WorkflowGraph }[] {
+    const db = this.#database.connection;
+    const rows = databaseRows(db.prepare(`${SUMMARY_SELECT} ORDER BY w.updated_at DESC, w.workflow_id`).all());
+    const nodes = byWorkflow(
+      databaseRows(db.prepare("SELECT * FROM workflow_nodes ORDER BY workflow_id, position, node_id").all()),
+    );
+    const edges = byWorkflow(
+      databaseRows(db.prepare("SELECT * FROM workflow_edges ORDER BY workflow_id, position, edge_id").all()),
+    );
+    return rows.map((row) => {
+      const workflowId = requiredStringColumn(row, "workflow_id");
+      return {
+        summary: toSummary(row),
+        graph: toGraph(
+          nodes.get(workflowId) ?? [],
+          edges.get(workflowId) ?? [],
+          requiredStringColumn(row, "strokes_json"),
+        ),
+      };
+    });
+  }
+
+  /** The workflows that have an agent step of the agent. */
+  workflowsOfAgent(agentId: string): string[] {
+    return databaseRows(
+      this.#database.connection
+        .prepare("SELECT DISTINCT workflow_id FROM workflow_nodes WHERE agent_id = ? ORDER BY workflow_id")
+        .all(agentId),
+    ).map((row) => requiredStringColumn(row, "workflow_id"));
   }
 
   detail(workflowId: string): WorkflowDetail | null {
@@ -156,27 +200,30 @@ export class WorkflowStore {
     });
   }
 
-  /** The earliest next occurrence of any schedule trigger, or null. */
+  /**
+   * The earliest next occurrence of any schedule trigger, or null. A workflow with an open run does
+   * not count: its occurrence comes when the run ends, and the end plans the timer again.
+   */
   nextTriggerDueAt(): string | null {
     const row = databaseRow(
       this.#database.connection
         .prepare(
-          `SELECT MIN(next_due_at) AS due FROM workflow_triggers
-           WHERE kind = 'schedule' AND next_due_at IS NOT NULL`,
+          `SELECT MIN(t.next_due_at) AS due FROM workflow_triggers AS t
+           WHERE t.kind = 'schedule' AND t.next_due_at IS NOT NULL AND ${NO_OPEN_RUN}`,
         )
         .get(),
     );
     return row ? optionalStringColumn(row, "due") : null;
   }
 
-  /** The schedule triggers whose next occurrence is not after `now`, earliest first. */
+  /** The schedule triggers whose next occurrence is not after `now`, earliest first, of workflows with no open run. */
   dueTriggers(now: Date): DueWorkflowTrigger[] {
     return databaseRows(
       this.#database.connection
         .prepare(
-          `SELECT workflow_id, node_id, schedule_json, timezone, next_due_at FROM workflow_triggers
-           WHERE kind = 'schedule' AND next_due_at IS NOT NULL AND next_due_at <= ?
-           ORDER BY next_due_at, workflow_id, node_id`,
+          `SELECT t.workflow_id, t.node_id, t.schedule_json, t.timezone, t.next_due_at FROM workflow_triggers AS t
+           WHERE t.kind = 'schedule' AND t.next_due_at IS NOT NULL AND t.next_due_at <= ? AND ${NO_OPEN_RUN}
+           ORDER BY t.next_due_at, t.workflow_id, t.node_id`,
         )
         .all(now.toISOString()),
     ).flatMap((row) => {
@@ -238,7 +285,7 @@ export class WorkflowStore {
           .prepare("SELECT graph_json FROM workflow_versions WHERE workflow_id = ? AND version_id = ?")
           .get(workflowId, versionId),
       );
-      if (!row) throw new WorkflowStoreError(sourceText("error.workflow.versionMissing"));
+      if (!row) throw new WorkflowStoreError({ code: "missing", message: sourceText("error.workflow.versionMissing") });
       const graph = storedGraph(requiredStringColumn(row, "graph_json"));
       assertRunnable(graph);
       const current = this.#requireDetail(workflowId);
@@ -249,25 +296,35 @@ export class WorkflowStore {
     });
   }
 
-  /** Keeps the graph a run starts from in the version history. */
+  /**
+   * Keeps the graph a run starts from in the version history, when the newest version is of another
+   * revision. Runs of a graph that does not change add one version only, so they do not push the
+   * saved versions out of the history.
+   */
   addRunVersion(workflowId: string, revision: number, graph: WorkflowGraph, now = new Date()): void {
+    const newest = databaseRow(
+      this.#database.connection
+        .prepare(
+          `SELECT graph_revision FROM workflow_versions WHERE workflow_id = ?
+           ORDER BY created_at DESC, version_id DESC LIMIT 1`,
+        )
+        .get(workflowId),
+    );
+    if (newest && requiredNumberColumn(newest, "graph_revision") === revision) return;
     this.#addVersion(workflowId, revision, "run", graph, now);
   }
 
   #graph(workflowId: string, strokesJson: string): WorkflowGraph {
-    const nodes = databaseRows(
-      this.#database.connection
-        .prepare("SELECT * FROM workflow_nodes WHERE workflow_id = ? ORDER BY position, node_id")
-        .all(workflowId),
-    ).map(toNode);
-    const edges = databaseRows(
-      this.#database.connection
-        .prepare("SELECT * FROM workflow_edges WHERE workflow_id = ? ORDER BY position, edge_id")
-        .all(workflowId),
-    ).map(toEdge);
-    const graph = { nodes, edges, strokes: JSON.parse(strokesJson) };
-    if (!isWorkflowGraph(graph)) throw new Error("The stored workflow graph is invalid.");
-    return graph;
+    const db = this.#database.connection;
+    return toGraph(
+      databaseRows(
+        db.prepare("SELECT * FROM workflow_nodes WHERE workflow_id = ? ORDER BY position, node_id").all(workflowId),
+      ),
+      databaseRows(
+        db.prepare("SELECT * FROM workflow_edges WHERE workflow_id = ? ORDER BY position, edge_id").all(workflowId),
+      ),
+      strokesJson,
+    );
   }
 
   #triggers(workflowId: string): WorkflowTriggerState[] {
@@ -435,17 +492,7 @@ export class WorkflowStore {
   }
 
   #transaction<T>(work: () => T): T {
-    const db = this.#database.connection;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = work();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      // SQLite may have rolled back already, and a second ROLLBACK would replace the error that did it.
-      if (db.isTransaction) db.exec("ROLLBACK");
-      throw error;
-    }
+    return workflowTransaction(this.#database, work);
   }
 }
 
@@ -461,11 +508,11 @@ const SUMMARY_SELECT = `
 
 function assertRunnable(graph: WorkflowGraph): void {
   const problem = workflowGraphProblem(graph);
-  if (problem) throw new WorkflowStoreError(sourceText(PROBLEM_TEXT[problem]));
+  if (problem) throw new WorkflowStoreError({ code: "refused", message: sourceText(PROBLEM_TEXT[problem]) });
 }
 
 function missing(): WorkflowStoreError {
-  return new WorkflowStoreError(sourceText("error.workflow.missing"));
+  return new WorkflowStoreError({ code: "missing", message: sourceText("error.workflow.missing") });
 }
 
 function triggerKind(node: WorkflowNode): StoredTriggerKind | null {
@@ -486,6 +533,23 @@ function nodeAgentId(node: WorkflowNode): string | null {
 
 function storedGraph(json: string): WorkflowGraph {
   const graph = JSON.parse(json);
+  if (!isWorkflowGraph(graph)) throw new Error("The stored workflow graph is invalid.");
+  return graph;
+}
+
+function byWorkflow(rows: readonly DynamicRecord[]): Map<string, DynamicRecord[]> {
+  const groups = new Map<string, DynamicRecord[]>();
+  for (const row of rows) {
+    const workflowId = requiredStringColumn(row, "workflow_id");
+    const group = groups.get(workflowId);
+    if (group) group.push(row);
+    else groups.set(workflowId, [row]);
+  }
+  return groups;
+}
+
+function toGraph(nodeRows: readonly DynamicRecord[], edgeRows: readonly DynamicRecord[], strokesJson: string) {
+  const graph = { nodes: nodeRows.map(toNode), edges: edgeRows.map(toEdge), strokes: JSON.parse(strokesJson) };
   if (!isWorkflowGraph(graph)) throw new Error("The stored workflow graph is invalid.");
   return graph;
 }

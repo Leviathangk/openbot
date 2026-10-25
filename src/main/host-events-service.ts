@@ -328,8 +328,8 @@ export class HostEventsService implements HostEventsApi {
     });
     if (received?.kind === "started")
       return { eventType, status: "started", reason: null, runId: runIdOf(received.run) };
-    // The route is a routine's, so it is never busy: only a workflow skips a request for that reason.
-    if (received?.kind === "ignored" && received.reason !== "busy")
+    // The route is a routine's, so it is never busy or refused: only a workflow skips a request so.
+    if (received?.kind === "ignored" && received.reason !== "busy" && received.reason !== "refused")
       return { eventType, status: "ignored", reason: received.reason, runId: null };
     return yield* eventFailure(
       sourceText(status === 503 ? "error.backend.webhookTestUnavailable" : "error.backend.webhookTestFailed"),

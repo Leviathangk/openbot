@@ -13,6 +13,7 @@ import {
   WORKFLOWS_ROUTES,
 } from "@openbot/contracts/team-protocol/workflows-v1";
 import { sourceText } from "@openbot/i18n/source";
+import { RoutineInputError } from "@openbot/team-client/routine-schedule";
 import { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
 import { WorkflowStoreError } from "../../backend/workflows/workflow-store";
@@ -37,16 +38,6 @@ import { readJson, requireAdmin, requireAgentLevel, stringField, WEBRTC_FRAME_BO
 
 const WORKFLOW_PATHS = new Set<string>(Object.values(WORKFLOWS_ROUTES));
 
-/** The store's sentences that mean "there is no such thing", which a client shows as missing. */
-const MISSING_KEYS = [
-  "error.workflow.missing",
-  "error.workflow.versionMissing",
-  "error.workflow.stepMissing",
-  "error.workflow.runMissing",
-  "error.workflow.nodeMissing",
-  "error.workflow.webhookMissing",
-] as const;
-
 function workflowMissing(): never {
   throw new HttpError(404, sourceText("error.workflow.missing"));
 }
@@ -60,14 +51,17 @@ function parse<A>(decode: (value: unknown) => A, body: unknown): A {
   }
 }
 
-/** A workflow refused by the store, such as a cycle, is the member's sentence. Anything else is a host fault. */
+/**
+ * A workflow refused by the store, such as a cycle, or a schedule that cannot run, is the member's
+ * sentence. Anything else is a host fault.
+ */
 async function run<A>(operation: Effect.Effect<A, { readonly cause: unknown }>): Promise<A> {
   try {
     return await runCauseEffect(operation);
   } catch (error) {
-    if (!(error instanceof WorkflowStoreError)) throw error;
-    const missing = MISSING_KEYS.some((key) => sourceText(key) === error.message);
-    throw new HttpError(missing ? 404 : 400, error.message);
+    if (error instanceof WorkflowStoreError) throw new HttpError(error.code === "missing" ? 404 : 400, error.message);
+    if (error instanceof RoutineInputError) throw new HttpError(400, error.message);
+    throw error;
   }
 }
 
@@ -210,13 +204,10 @@ export async function routeWorkflows(
   switch (path) {
     case WORKFLOWS_ROUTES.list: {
       const known = listed();
-      const summaries = await run(workflows.list());
-      const visible = [];
-      for (const summary of summaries) {
-        const detail = await run(workflows.get(summary.id));
-        if (visibleGraph(detail.graph, known)) visible.push(summary);
-      }
-      return json(200, { workflows: visible });
+      const all = await run(workflows.listWithGraphs());
+      return json(200, {
+        workflows: all.filter(({ graph }) => visibleGraph(graph, known)).map(({ summary }) => summary),
+      });
     }
     case WORKFLOWS_ROUTES.get:
       return json(200, memberDetail(await visibleDetail(stringField(body, "workflowId"))));

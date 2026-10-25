@@ -144,6 +144,11 @@ export interface WorkflowsDependencies {
   ): Effect.Effect<{ posted: true } | { failure: MessagingPostFailure }>;
   /** The workflow whose graph, title, versions or runs changed. */
   changed(workflowId: string): void;
+  /**
+   * Plans the schedule timer again: a trigger changed, or a run ended, and an occurrence that waited
+   * for it is due.
+   */
+  rearm(): void;
   /** The zone of a schedule trigger that names none: the server timezone. */
   timezone(): string;
   now?: () => Date;
@@ -156,16 +161,21 @@ export interface WorkflowWebhookDelivery {
   event: ReceivedWebhookEvent;
 }
 
-/** What a webhook trigger did with a request. A busy workflow skips it, as a schedule does. */
+/**
+ * What a webhook trigger did with a request. A busy workflow skips it, as a schedule does; a graph
+ * that cannot start, such as one with a node of a newer version, refuses it.
+ */
 export type WorkflowWebhookResult =
   | { kind: "started"; run: WorkflowRun }
-  | { kind: "ignored"; reason: "busy" }
+  | { kind: "ignored"; reason: "busy" | "refused" }
   | { kind: "duplicate" }
   | { kind: "gone" }
   | { kind: "too-large" };
 
 export interface WorkflowsShape {
   list(): Effect.Effect<WorkflowSummary[], WorkflowFailed>;
+  /** Every workflow with its graph, in one read. */
+  listWithGraphs(): Effect.Effect<{ summary: WorkflowSummary; graph: WorkflowGraph }[], WorkflowFailed>;
   get(workflowId: string): Effect.Effect<WorkflowDetail, WorkflowFailed>;
   create(input: CreateWorkflowInput): Effect.Effect<WorkflowDetail, WorkflowFailed>;
   rename(input: RenameWorkflowInput): Effect.Effect<WorkflowSummary, WorkflowFailed>;
@@ -209,7 +219,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         const lock = yield* Semaphore.make(1);
         /** One model step at a time, so a run does not take every generation slot of the computer. */
         const generationLock = yield* Semaphore.make(1);
-        const { store, runs, changed } = dependencies;
+        const { store, runs, changed, rearm } = dependencies;
         const now = () => (dependencies.now ?? (() => new Date()))();
         /** The model steps that generate and the posts on their way, by step. */
         const working = new Map<string, Fiber.Fiber<void>>();
@@ -218,11 +228,12 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         const attempt = <A>(work: () => A) =>
           Effect.try({ try: work, catch: (cause) => new WorkflowFailed({ cause }) });
-        const refuse = (message: string) => new WorkflowFailed({ cause: new WorkflowStoreError(message) });
+        const refuse = (code: WorkflowStoreError["code"], message: string) =>
+          new WorkflowFailed({ cause: new WorkflowStoreError({ code, message }) });
 
         const detailOf = (workflowId: string) => {
           const detail = store.detail(workflowId);
-          if (!detail) throw new WorkflowStoreError(sourceText("error.workflow.missing"));
+          if (!detail) throw new WorkflowStoreError({ code: "missing", message: sourceText("error.workflow.missing") });
           return detail;
         };
         const runDetail = (run: StoredWorkflowRun): WorkflowRunDetail => ({
@@ -277,7 +288,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         /** Ends an agent step from its delivery. Answers whether the step ended. */
         const settleFromDelivery = (step: StoredWorkflowStep): boolean => {
-          if (!step.deliveryId || !step.agentId) return false;
+          if (!step.deliveryId) return false;
+          // The agent was deleted while it answered.
+          if (!step.agentId)
+            return settle(step, { status: "failed", error: sourceText("error.workflow.agentMissing") });
           const delivery = dependencies.delivery(step.deliveryId);
           if (!delivery) return settle(step, { status: "failed", error: sourceText("error.workflow.agentStepEnded") });
           if (delivery.turnId) runs.attachTurn(step.id, delivery.turnId, now());
@@ -348,6 +362,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                       runs.endOutput(step.id, "uncertain", "interrupted", now());
                       // A stop settles its own step, and a restart leaves it to the first pass.
                       if (Cause.hasInterruptsOnly(exit.cause)) return;
+                      logger.warn("A workflow output post stopped with a defect.", {
+                        stepId: step.id,
+                        cause: String(exit.cause),
+                      });
                       settle(step, { status: "failed", error: outputError("uncertain") });
                       yield* requestSweep();
                     }),
@@ -529,7 +547,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
               if (actions.length === 0) break;
               for (const action of actions) {
                 const node = nodes.get(action.nodeId);
-                if (!node) continue;
+                if (!node) return;
                 const step = runs.addStep(
                   {
                     workflowId: run.workflowId,
@@ -565,11 +583,19 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                   : ends.some((step) => step.status === "stopped")
                     ? "stopped"
                     : "done";
-          if (runs.setRunStatus(run.id, status, null, now())) changed(run.workflowId);
+          if (!runs.setRunStatus(run.id, status, null, now())) return;
+          changed(run.workflowId);
+          if (status !== "running" && status !== "approval" && status !== "stopping") rearm();
         });
 
         const sweepOnce = Effect.fn("Workflows.sweepOnce")(function* () {
           const runIds = new Set<string>();
+          for (const run of runs.openRuns()) {
+            runIds.add(run.id);
+            // A stop holds the lock until its steps end, so open steps here mean a restart cut the stop off.
+            if (run.status === "stopping")
+              for (const step of runs.steps(run.id)) if (isOpenStep(step)) yield* stopNow(step);
+          }
           for (const step of runs.openSteps()) {
             if (step.status !== "running") continue;
             let ended = false;
@@ -579,14 +605,23 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 yield* sendAgentStep(step);
                 ended = runs.step(step.id)?.status !== "running";
               } else ended = settleFromDelivery(step);
-            } else if ((step.kind === "llm" || step.kind === "condition") && !working.has(step.id)) {
-              ended = settle(step, { status: "failed", error: sourceText("error.workflow.interrupted") });
-            } else if (step.kind === "output" && !working.has(step.id)) {
-              ended = yield* resumeOutput(step);
+            } else if (step.kind === "llm" || step.kind === "condition" || step.kind === "output") {
+              if (working.has(step.id)) continue;
+              ended =
+                step.kind === "output"
+                  ? yield* resumeOutput(step)
+                  : settle(step, { status: "failed", error: sourceText("error.workflow.interrupted") });
+            } else {
+              // A restart came between the step and what it does at once, such as an approval's wait.
+              const run = step.runId ? runs.run(step.runId) : null;
+              const graph = run?.graph ?? store.detail(step.workflowId)?.graph;
+              const node = graph?.nodes.find((candidate) => candidate.id === step.nodeId);
+              if (node) yield* execute(step, node, run);
+              else settle(step, { status: "failed", error: sourceText("error.workflow.nodeMissing") });
+              ended = runs.step(step.id)?.status !== "running";
             }
             if (ended && step.runId) runIds.add(step.runId);
           }
-          for (const run of runs.openRuns()) runIds.add(run.id);
           for (const runId of runIds) yield* advance(runId);
         });
 
@@ -620,7 +655,9 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           });
 
         const notice = Effect.fn("Workflows.notice")(function* (event: AgentEvent) {
-          if (event.type !== "turn-completed" && event.type !== "queue-changed") return;
+          // A deleted agent leaves the steps it was answering without an answer.
+          if (event.type !== "turn-completed" && event.type !== "queue-changed" && event.type !== "agents-changed")
+            return;
           yield* requestSweep();
         });
 
@@ -631,6 +668,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         const list = Effect.fn("Workflows.list")(function* () {
           return yield* attempt(() => store.list());
+        });
+
+        const listWithGraphs = Effect.fn("Workflows.listWithGraphs")(function* () {
+          return yield* attempt(() => store.listWithGraphs());
         });
 
         const get = Effect.fn("Workflows.get")(function* (workflowId: string) {
@@ -647,6 +688,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             ),
           );
           changed(detail.summary.id);
+          rearm();
           return detail;
         });
 
@@ -663,7 +705,9 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
               for (const step of runs.openSteps())
                 if (step.workflowId === workflowId) yield* stopNow(step).pipe(Effect.ignore);
               const removed = yield* attempt(() => store.remove(workflowId, now()));
-              if (removed) changed(workflowId);
+              if (!removed) return;
+              changed(workflowId);
+              rearm();
             }),
           );
         });
@@ -678,7 +722,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             ),
           );
           // A conflict changed nothing: the editor that saved gets the newer workflow in the answer.
-          if (result.ok) changed(input.workflowId);
+          if (result.ok) {
+            changed(input.workflowId);
+            rearm();
+          }
           return result;
         });
 
@@ -692,16 +739,21 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         const restoreVersion = Effect.fn("Workflows.restoreVersion")(function* (input: RestoreWorkflowVersionInput) {
           const detail = yield* attempt(() => store.restoreVersion(input.workflowId, input.versionId, now()));
           changed(input.workflowId);
+          rearm();
           return detail;
         });
 
         // --- Run actions ---------------------------------------------------------------------------
 
-        /** Starts a run from a node, or from the start of the graph. Call it under the lock. */
+        /**
+         * Starts a run from a node, or from the start of the graph. Call it under the lock. The run, its
+         * version, the earlier answers it reuses and `record` are one write, so a failure keeps none.
+         */
         const begin = Effect.fn("Workflows.begin")(function* (
           detail: WorkflowDetail,
           from: WorkflowNode | null,
           origin: RunOrigin,
+          record: (run: StoredWorkflowRun) => void = () => {},
         ) {
           const start = {
             triggerNodeId: from?.kind === "trigger" ? from.id : null,
@@ -711,38 +763,42 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           const answered = runs.latestDone(workflowId);
           const scope = runScope(detail.graph, start, new Set(answered.keys()));
           if (detail.graph.nodes.some((node) => scope.nodes.has(node.id) && unsupportedNode(node)))
-            return yield* refuse(sourceText("error.workflow.nodeUnsupported"));
-          const { run, created } = yield* attempt(() =>
-            runs.startRun({ workflowId, ...start, ...origin, revision: detail.revision, graph: detail.graph }, now()),
+            return yield* refuse("refused", sourceText("error.workflow.nodeUnsupported"));
+          const started = yield* attempt(() =>
+            runs.startRun(
+              { workflowId, ...start, ...origin, revision: detail.revision, graph: detail.graph },
+              now(),
+              (run) => {
+                store.addRunVersion(workflowId, detail.revision, detail.graph, now());
+                // The nodes before the start give their earlier answers again.
+                for (const nodeId of scope.reused) {
+                  const earlier = answered.get(nodeId);
+                  if (!earlier) continue;
+                  runs.addStep(
+                    {
+                      workflowId,
+                      runId: run.id,
+                      nodeId,
+                      kind: earlier.kind,
+                      requestId: `${run.id}:${nodeId}:reused`,
+                      agentId: earlier.agentId,
+                      status: "done",
+                      input: earlier.input,
+                      output: earlier.output,
+                      branch: earlier.branch,
+                    },
+                    now(),
+                  );
+                }
+                record(run);
+              },
+            ),
           );
-          if (created) {
-            yield* attempt(() => {
-              store.addRunVersion(workflowId, detail.revision, detail.graph, now());
-              // The nodes before the start give their earlier answers again.
-              for (const nodeId of scope.reused) {
-                const earlier = answered.get(nodeId);
-                if (!earlier) continue;
-                runs.addStep(
-                  {
-                    workflowId: run.workflowId,
-                    runId: run.id,
-                    nodeId,
-                    kind: earlier.kind,
-                    requestId: `${run.id}:${nodeId}:reused`,
-                    agentId: earlier.agentId,
-                    status: "done",
-                    input: earlier.input,
-                    output: earlier.output,
-                    branch: earlier.branch,
-                  },
-                  now(),
-                );
-              }
-            });
+          if (started.created) {
             changed(workflowId);
-            yield* advance(run.id);
+            yield* advance(started.run.id);
           }
-          return runs.run(run.id) ?? run;
+          return { run: runs.run(started.run.id) ?? started.run, created: started.created };
         });
 
         const startRun = Effect.fn("Workflows.startRun")(function* (input: StartWorkflowRunInput) {
@@ -750,8 +806,8 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             Effect.gen(function* () {
               const detail = yield* attempt(() => detailOf(input.workflowId));
               const from = input.fromNodeId ? detail.graph.nodes.find((node) => node.id === input.fromNodeId) : null;
-              if (from === undefined) return yield* refuse(sourceText("error.workflow.nodeMissing"));
-              const run = yield* begin(detail, from, {
+              if (from === undefined) return yield* refuse("missing", sourceText("error.workflow.nodeMissing"));
+              const { run } = yield* begin(detail, from, {
                 source: "manual",
                 scheduledFor: null,
                 idempotencyKey: `manual:${input.requestId}`,
@@ -763,8 +819,8 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
         });
 
         /**
-         * Starts the run of one occurrence of a schedule trigger. A workflow that still runs skips the
-         * occurrence, so a slow workflow on a short schedule does not pile up runs.
+         * Starts the run of one occurrence of a schedule trigger. The store gives no due trigger of a
+         * workflow that still runs; a run that opened after that read skips the occurrence.
          */
         const startScheduled = Effect.fn("Workflows.startScheduled")(function* (input: ScheduledWorkflowStart) {
           yield* locked(
@@ -802,16 +858,33 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
                 );
                 return { kind: "ignored", reason: "busy" };
               }
-              const run = yield* begin(detail, trigger, {
-                source: "webhook",
-                scheduledFor: null,
-                idempotencyKey: `webhook:${nodeId}:${event.deliveryId}`,
-                payload,
-              });
-              yield* attempt(() =>
-                runs.addWebhookReceipt({ ...receipt, status: "started", reason: null, runId: run.id }),
-              );
-              return { kind: "started", run: publicRun(run) };
+              const started = yield* begin(
+                detail,
+                trigger,
+                {
+                  source: "webhook",
+                  scheduledFor: null,
+                  idempotencyKey: `webhook:${nodeId}:${event.deliveryId}`,
+                  payload,
+                },
+                (run) => runs.addWebhookReceipt({ ...receipt, status: "started", reason: null, runId: run.id }),
+              ).pipe(Effect.result);
+              if (Result.isFailure(started)) {
+                // A fault of this host fails the request, so the sender sends it again.
+                if (!(started.failure.cause instanceof WorkflowStoreError)) return yield* started.failure;
+                // The sender cannot change why the graph does not start, so the delivery is kept as done.
+                logger.warn("A workflow webhook request did not start a run.", {
+                  workflowId,
+                  nodeId,
+                  cause: String(started.failure.cause),
+                });
+                yield* attempt(() =>
+                  runs.addWebhookReceipt({ ...receipt, status: "ignored", reason: "refused", runId: null }),
+                );
+                return { kind: "ignored", reason: "refused" };
+              }
+              if (!started.success.created) return { kind: "duplicate" };
+              return { kind: "started", run: publicRun(started.success.run) };
             }),
           );
         });
@@ -821,8 +894,8 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
             Effect.gen(function* () {
               const detail = yield* attempt(() => detailOf(input.workflowId));
               const node = detail.graph.nodes.find((candidate) => candidate.id === input.nodeId);
-              if (!node) return yield* refuse(sourceText("error.workflow.nodeMissing"));
-              if (unsupportedNode(node)) return yield* refuse(sourceText("error.workflow.nodeUnsupported"));
+              if (!node) return yield* refuse("missing", sourceText("error.workflow.nodeMissing"));
+              if (unsupportedNode(node)) return yield* refuse("refused", sourceText("error.workflow.nodeUnsupported"));
               const inputs = soloInputs(detail.graph, node.id, runs.latestDone(input.workflowId));
               const step = yield* attempt(() =>
                 runs.addStep(
@@ -851,7 +924,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           yield* locked(
             Effect.gen(function* () {
               const step = runs.step(stepId);
-              if (!step) return yield* refuse(sourceText("error.workflow.stepMissing"));
+              if (!step) return yield* refuse("missing", sourceText("error.workflow.stepMissing"));
               if (!isOpenStep(step)) return;
               yield* stopNow(step);
               if (step.runId) yield* advance(step.runId);
@@ -871,7 +944,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           yield* locked(
             Effect.gen(function* () {
               const run = runs.run(runId);
-              if (!run) return yield* refuse(sourceText("error.workflow.runMissing"));
+              if (!run) return yield* refuse("missing", sourceText("error.workflow.runMissing"));
               yield* stopRunNow(run);
             }),
           );
@@ -881,13 +954,13 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           return yield* locked(
             Effect.gen(function* () {
               const failed = runs.step(input.stepId);
-              if (!failed) return yield* refuse(sourceText("error.workflow.stepMissing"));
+              if (!failed) return yield* refuse("missing", sourceText("error.workflow.stepMissing"));
               if (failed.status !== "failed" && failed.status !== "stopped")
-                return yield* refuse(sourceText("error.workflow.notRetryable"));
+                return yield* refuse("refused", sourceText("error.workflow.notRetryable"));
               const run = failed.runId ? runs.run(failed.runId) : null;
               const graph: WorkflowGraph = run?.graph ?? (yield* attempt(() => detailOf(failed.workflowId))).graph;
               const node = graph.nodes.find((candidate) => candidate.id === failed.nodeId);
-              if (!node) return yield* refuse(sourceText("error.workflow.nodeMissing"));
+              if (!node) return yield* refuse("missing", sourceText("error.workflow.nodeMissing"));
               if (run && runs.reopenRun(run.id, now())) changed(run.workflowId);
               const step = yield* attempt(() =>
                 runs.addStep(
@@ -917,8 +990,8 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           yield* locked(
             Effect.gen(function* () {
               const step = runs.step(input.stepId);
-              if (!step) return yield* refuse(sourceText("error.workflow.stepMissing"));
-              if (step.status !== "approval") return yield* refuse(sourceText("error.workflow.noDecision"));
+              if (!step) return yield* refuse("missing", sourceText("error.workflow.stepMissing"));
+              if (step.status !== "approval") return yield* refuse("refused", sourceText("error.workflow.noDecision"));
               settle(step, input.approved ? { status: "done", output: step.input } : { status: "stopped" });
               const run = step.runId ? runs.run(step.runId) : null;
               if (!run) return;
@@ -938,7 +1011,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         const run = Effect.fn("Workflows.run")(function* (runId: string) {
           const found = runs.run(runId);
-          if (!found) return yield* refuse(sourceText("error.workflow.runMissing"));
+          if (!found) return yield* refuse("missing", sourceText("error.workflow.runMissing"));
           return yield* attempt(() => runDetail(found));
         });
 
@@ -954,6 +1027,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
 
         return Workflows.of({
           list,
+          listWithGraphs,
           get,
           create,
           rename,

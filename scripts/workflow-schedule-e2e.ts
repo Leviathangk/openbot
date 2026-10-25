@@ -81,6 +81,7 @@ async function open() {
       connectionOn: () => false,
       post: () => Effect.die(new Error("No output posts in this test.")),
       changed: () => {},
+      rearm: () => {},
       timezone: () => ZONE,
       now: () => clock,
     }),
@@ -210,7 +211,7 @@ try {
   check("a schedule that is too frequent is refused", refused !== null && refused.length > 0, refused);
   check("the refused save keeps the plan", (await app.nextDueAt(quarterId)) === "2026-10-24T11:05:00.000Z");
 
-  // A workflow whose run waits for an approval skips the next occurrence.
+  // A workflow whose run waits for an approval is not due: its occurrence waits for the run to end.
   const gated = await runCauseEffect(app.workflows.create({ title: "Waits for a person" }));
   assert.ok(
     (
@@ -238,9 +239,39 @@ try {
   gatedRuns = await app.runsOf(gated.summary.id);
   check("an occurrence while the run waits starts nothing", gatedRuns.length === 1, gatedRuns.length);
   check(
-    "the skipped occurrence still moves the plan",
+    "the waiting occurrence keeps its plan",
+    (await app.nextDueAt(gated.summary.id)) === "2026-10-24T10:45:00.000Z",
+  );
+  check(
+    "the timer does not wake for a workflow that runs",
+    app.timer.nextDueAt() === "2026-10-24T11:05:00.000Z",
+    app.timer.nextDueAt(),
+  );
+  /** Approves the step that the newest run of the gated workflow waits on, so the run ends. */
+  const approveNewest = async () => {
+    const newest = (await app.runsOf(gated.summary.id))[0];
+    assert.ok(newest, "the gated workflow has a run");
+    const { steps } = await runCauseEffect(app.workflows.run(newest.id));
+    const waiting = steps.find((step) => step.status === "approval");
+    assert.ok(waiting, "the run waits for a decision");
+    await runCauseEffect(app.workflows.decide({ stepId: waiting.id, approved: true }));
+  };
+  clock = new Date("2026-10-24T10:50:00.000Z");
+  await approveNewest();
+  gatedRuns = await app.runsOf(gated.summary.id);
+  check("the approved run ends", gatedRuns[0]?.status === "done", gatedRuns[0]);
+  await app.fire();
+  gatedRuns = await app.runsOf(gated.summary.id);
+  check(
+    "the occurrence that waited starts when the run ends",
+    gatedRuns.length === 2 && gatedRuns[0]?.scheduledFor === "2026-10-24T10:45:00.000Z",
+    gatedRuns,
+  );
+  check(
+    "then the plan moves to the next occurrence",
     (await app.nextDueAt(gated.summary.id)) === "2026-10-24T11:00:00.000Z",
   );
+  await approveNewest();
 
   const once = await runCauseEffect(app.workflows.create({ title: "Once" }));
   const onceSchedule: RoutineSchedule = { kind: "once", date: "2026-10-24", time: "12:00" };
