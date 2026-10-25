@@ -317,7 +317,7 @@ export interface BoardOptions {
   fresh?: () => boolean;
   edgeTone?: (edge: WfnEdge) => WfnEdgeTone;
   /** The results that the steps have before the story opens. */
-  results?: Record<string, readonly WfnResult[]>;
+  results?: Record<string, readonly WfnResult[]> | undefined;
   /**
    * The results of each step from the host. With it, the board shows these results, not the ones that
    * `record` and `recordFailure` add.

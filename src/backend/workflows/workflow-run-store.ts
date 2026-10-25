@@ -52,7 +52,7 @@ export interface StoredWorkflowStep extends WorkflowStep {
   createdAt: string;
 }
 
-export const OPEN_STEP_STATUSES = ["running", "approval"] as const satisfies readonly WorkflowStepStatus[];
+const OPEN_STEP_STATUSES = ["running", "approval"] as const satisfies readonly WorkflowStepStatus[];
 /** Whether a step has not ended yet. */
 export function isOpenStep(step: Pick<WorkflowStep, "status">): boolean {
   return isOneOf(OPEN_STEP_STATUSES, step.status);

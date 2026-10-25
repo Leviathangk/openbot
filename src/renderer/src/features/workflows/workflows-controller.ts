@@ -20,10 +20,7 @@ const RUN_PAGE = 20;
 /** The pause after the last edit before the canvas saves. */
 const SAVE_DELAY_MS = 400;
 
-export type WorkflowsControllerProps = Omit<
-  WorkflowCanvasProps,
-  "workflow" | "features" | "frame" | "readOnly" | "catalogs"
->;
+type WorkflowsControllerProps = Omit<WorkflowCanvasProps, "workflow" | "features" | "frame" | "readOnly" | "catalogs">;
 
 /**
  * The state and the callbacks of the canvas over one host. The canvas keeps its edits; this saves

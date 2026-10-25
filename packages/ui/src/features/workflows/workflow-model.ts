@@ -66,5 +66,5 @@ export interface WorkflowCatalogs {
   /** The workspace files that an asset node can take, and the images that image steps made. */
   files: readonly StoredFileRow[];
   /** The name of the user, which a new sticky note saves as its author. */
-  self?: string;
+  self?: string | undefined;
 }

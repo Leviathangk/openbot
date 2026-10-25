@@ -30,7 +30,7 @@ import { type PickerChip, PickerMenu, type PickerOption, PickerRow, pickerMatche
 import { Hint, useBoard } from "./workflow-board";
 import { type WfProvider, wfKnownProvider } from "./workflow-node-parts";
 
-export const EFFORT_LABEL = {
+const EFFORT_LABEL = {
   low: "provider.effort.low",
   medium: "provider.effort.medium",
   high: "provider.effort.high",

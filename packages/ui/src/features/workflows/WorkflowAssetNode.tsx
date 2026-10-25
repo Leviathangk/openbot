@@ -208,7 +208,7 @@ function UploadButton(props: { onAdd: (file: StoredFileRow) => void }) {
 }
 
 /** The workspace library, as the Higgsfield Assets panel: filter pills and a grid of files. */
-function AssetLibrary(props: { selected?: string; onPick: (file: StoredFileRow) => void }) {
+function AssetLibrary(props: { selected?: string | undefined; onPick: (file: StoredFileRow) => void }) {
   const board = useBoard();
   const { t } = useText();
   const [filter, setFilter] = createSignal<AssetFilter>("recent");

@@ -362,7 +362,7 @@ export interface ShellProps {
   inputs?: readonly WfnPortType[];
   /** The step cannot run until a line comes into one of its inputs. */
   requires?: boolean;
-  output?: WfnPortType;
+  output?: WfnPortType | undefined;
   toolbar: JSX.Element;
   media?: boolean;
   /** The image of a result in the results strip. A text step has none. */
@@ -666,7 +666,7 @@ export function resultTime(format: AppFormat, at: string): string {
  * image step shows each image; a text step shows the number of each result. The arrows move to the
  * result before or after the one on view. A step with one result shows nothing.
  */
-function ResultStrip(props: { id: string; thumb?: (result: WfnResult) => string | undefined }) {
+function ResultStrip(props: { id: string; thumb?: ((result: WfnResult) => string | undefined) | undefined }) {
   const board = useBoard();
   const { t, format } = useText();
   const list = () => board.results(props.id);
@@ -783,7 +783,7 @@ export function ChoicePill<T extends string>(props: {
   choices: readonly Choice<T>[];
   /** The text of the pill when no choice has the value. */
   placeholder?: string;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
   onChange: (value: T) => void;
 }) {
   const { t } = useText();
@@ -933,7 +933,10 @@ const placeKey = (connectionId: string, placeId: string) => JSON.stringify([conn
  * The place of a node, such as the channel that an output posts to. A new node takes the first place
  * of the catalog. The connection and the place change as one change.
  */
-export function usePlace(id: () => string, initial: { connectionId?: string; placeId?: string }) {
+export function usePlace(
+  id: () => string,
+  initial: { connectionId?: string | undefined; placeId?: string | undefined },
+) {
   const board = useBoard();
   const first = untrack(() => board.catalogs().places[0]);
   const [connectionId] = useField(

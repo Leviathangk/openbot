@@ -61,7 +61,7 @@ export interface HostWebhookRelay {
 }
 
 /** The webhook triggers of workflows: they share the routes, the relay and the route limit. */
-export interface HostWorkflowWebhooks {
+interface HostWorkflowWebhooks {
   receive(delivery: WorkflowWebhookDelivery): Effect.Effect<WorkflowWebhookResult, { readonly cause: unknown }>;
   /** The workflow whose webhook address changed. */
   changed(workflowId: string): void;

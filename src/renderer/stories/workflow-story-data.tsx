@@ -86,7 +86,7 @@ export const storyWebhook = (id: string) => `https://hooks.openbot.run/wf/${id}`
 /* ------------------------------------------------------------ Workflows */
 
 /** A saved version of a story workflow, with the graph that its preview shows. */
-export interface StoryVersion {
+interface StoryVersion {
   version: WorkflowVersion;
   graph: WorkflowGraph;
 }
@@ -111,7 +111,7 @@ const octoberAt = (day: number, hours: number, minutes: number) => new Date(2026
  * Competitor watch, with every node type: the inputs on the left, an agent that does the research,
  * two direct model calls that write, an image step, and an agent that posts the result.
  */
-export const COMPETITOR_WATCH: WorkflowGraph = {
+const COMPETITOR_WATCH: WorkflowGraph = {
   nodes: [
     { kind: "text", id: "h-inputs", at: { x: 0, y: -96 }, fields: { text: "INPUTS", size: "lg", bold: true } },
     { kind: "text", id: "h-research", at: { x: COLUMN, y: -96 }, fields: { text: "RESEARCH", size: "lg", bold: true } },
@@ -193,7 +193,7 @@ export const COMPETITOR_WATCH: WorkflowGraph = {
 };
 
 /** New competitor alert: a branch on what the research found, and an approval before the post. */
-export const NEW_COMPETITOR_ALERT: WorkflowGraph = {
+const NEW_COMPETITOR_ALERT: WorkflowGraph = {
   nodes: [
     {
       kind: "trigger",
@@ -350,7 +350,7 @@ const COMPETITOR_WATCH_TRIES: Record<string, readonly { at: string; value: strin
  * The run history of Competitor watch: two scheduled runs and the steps that ran alone after them.
  * With `last`, a third run ended just now, with each step done or with the summary failed.
  */
-export function competitorWatchRuns(workflowId: string, last?: "done" | "failed"): WorkflowRunView {
+function competitorWatchRuns(workflowId: string, last?: "done" | "failed"): WorkflowRunView {
   const runs = [
     competitorWatchRun({
       workflowId,
@@ -446,7 +446,7 @@ const earlierToday = (hours: number, minutes: number) =>
   new Date(Math.min(Date.parse(todayAt(hours, minutes)), Date.now() - 60_000)).toISOString();
 
 /** The auto-saved versions of Competitor watch, newest first. The column headings came last, one column at a time. */
-export function competitorWatchVersions(): StoryVersion[] {
+function competitorWatchVersions(): StoryVersion[] {
   return [
     { at: earlierToday(11, 30), without: ["h-publish"] },
     { at: octoberAt(23, 17, 4), without: ["h-image", "h-publish"] },

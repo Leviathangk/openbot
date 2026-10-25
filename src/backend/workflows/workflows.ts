@@ -92,7 +92,7 @@ class WorkflowFailed extends Schema.TaggedError<WorkflowFailed>()("WorkflowFaile
 }) {}
 
 /** A delivery as the runtime reads it: whether it ended, and the turn that answered it. */
-export interface WorkflowDelivery {
+interface WorkflowDelivery {
   status: QueueDeliveryStatus;
   turnId: string | null;
   error: string | null;
@@ -106,7 +106,7 @@ export interface WorkflowNotice {
   text: string;
 }
 
-export interface WorkflowTextRequest {
+interface WorkflowTextRequest {
   provider: AgentProvider | null;
   model: string | null;
   effort: AgentReasoningEffort | null;
@@ -177,12 +177,12 @@ export type WorkflowWebhookResult =
   | { kind: "too-large" };
 
 /** The workflow of a run or a step, and the agents that the run can still reach. */
-export interface WorkflowRunScope {
+interface WorkflowRunScope {
   workflowId: string;
   agentIds: string[];
 }
 
-export interface WorkflowsShape {
+interface WorkflowsShape {
   list(): Effect.Effect<WorkflowSummary[], WorkflowFailed>;
   /** Every workflow with its graph, in one read. */
   listWithGraphs(): Effect.Effect<{ summary: WorkflowSummary; graph: WorkflowGraph }[], WorkflowFailed>;

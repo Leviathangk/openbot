@@ -119,7 +119,7 @@ function ImageModelPill(props: {
  * An image that an image model makes. The card is the image; on hover or selection a glass panel
  * holds the description, the model and Run, with the aspect chip above it.
  */
-export function ImageNode(props: { id: string; image?: string; prompt?: string; aspect?: Aspect }) {
+export function ImageNode(props: { id: string; image?: string | undefined; prompt?: string; aspect?: Aspect }) {
   const board = useBoard();
   const { t } = useText();
   const [prompt, setPrompt] = useTextField(
