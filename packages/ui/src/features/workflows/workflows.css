@@ -842,6 +842,12 @@
   gap: var(--openbot-space-1);
   align-items: center;
   padding-left: var(--openbot-space-2);
+  border-radius: var(--wfn-tool-radius);
+}
+
+/* The field has no border, so a 1px ring in the focus colour shows where typing goes. */
+.wfn-search-field:has(.wfn-search-input:focus-visible) {
+  box-shadow: inset 0 0 0 1px var(--openbot-border-focus);
 }
 
 .wfn-stage .wfn-search-icon {

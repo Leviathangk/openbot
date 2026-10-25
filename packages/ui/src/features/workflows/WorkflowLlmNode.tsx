@@ -31,8 +31,8 @@ export function LlmNode(props: { id: string; prompt?: string; system?: string })
   const { t } = useText();
   const models = () => board.catalogs().models;
   const first = untrack(() => models()[0]);
-  const [model, setModel] = useField<AgentModelId>(() => props.id, "model", first?.id ?? "", asString);
-  const [provider, setProvider] = useField<WfProvider>(
+  const [model] = useField<AgentModelId>(() => props.id, "model", first?.id ?? "", asString);
+  const [provider] = useField<WfProvider>(
     () => props.id,
     "provider",
     first ? wfKnownProvider(first.provider) : "codex",
@@ -94,12 +94,13 @@ export function LlmNode(props: { id: string; prompt?: string; system?: string })
             value={model()}
             disabled={locked()}
             onChange={(next, nextProvider) => {
-              setModel(next);
-              setProvider(nextProvider);
               const options = modelOption(models(), next);
-              if (options && !options.supportedReasoningEfforts.includes(effort())) {
-                setEffort(options.defaultReasoningEffort);
-              }
+              const keep = !options || options.supportedReasoningEfforts.includes(effort());
+              board.setFields(props.id, {
+                model: next,
+                provider: nextProvider,
+                ...(keep ? {} : { effort: options.defaultReasoningEffort }),
+              });
             }}
           />
           <EffortPill

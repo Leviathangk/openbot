@@ -4,11 +4,12 @@ import type { AppTextKey } from "@openbot/i18n";
 import { Bold, Button, LabelTooltipTrigger, StickyNote, Textarea, UserRoundPen } from "@openbot/ui";
 import { Show, untrack } from "solid-js";
 import { useText } from "../../text";
-import { Hint, useBoard } from "./workflow-board";
+import { Hint } from "./workflow-board";
 import {
   ALIGN_ICONS,
   ALIGNS,
   asBoolean,
+  asString,
   type CanvasColor,
   COLORS,
   FONTS,
@@ -54,11 +55,10 @@ const NOTE_SIZES: readonly { value: NoteSize; label: AppTextKey; pixels: number 
  * shows or hides the author. It has no ports, and a run skips it.
  */
 export function NoteNode(props: { id: string; text?: string; tone?: NoteTone }) {
-  const board = useBoard();
   const { t } = useText();
   const id = () => props.id;
-  /** The user who writes the notes. */
-  const self = () => board.catalogs().self;
+  /** The user who wrote the note. The canvas saves the name when it adds the note, so each reader sees the same name. */
+  const [writer] = useField(id, "authorName", "", asString);
   const [text, setText] = useTextField(
     id,
     "text",
@@ -152,7 +152,7 @@ export function NoteNode(props: { id: string; text?: string; tone?: NoteTone }) 
                 <Bold />
               </LabelTooltipTrigger>
             </Hint>
-            <Show when={self()}>
+            <Show when={writer()}>
               <ToolbarSeparator />
               <Hint label={author() ? t("workflow.note.hideAuthor") : t("workflow.note.showAuthor")}>
                 <LabelTooltipTrigger
@@ -184,7 +184,7 @@ export function NoteNode(props: { id: string; text?: string; tone?: NoteTone }) 
         value={text()}
         onValueChange={setText}
       />
-      <Show when={author() ? self() : undefined}>{(name) => <span class="wfn-note-author">{name()}</span>}</Show>
+      <Show when={author() ? writer() : undefined}>{(name) => <span class="wfn-note-author">{name()}</span>}</Show>
     </NodeShell>
   );
 }

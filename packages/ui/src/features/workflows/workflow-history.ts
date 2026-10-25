@@ -182,8 +182,11 @@ export function createCanvasHistory(options: {
   };
 }
 
-/** The schedule of a new trigger node: each day at 09:00, as a new routine has. */
-export const NEW_TRIGGER_SCHEDULE: RoutineSchedule = { kind: "daily", time: "09:00" };
+/**
+ * The schedule of a new trigger node: each day at 09:00, as a new routine has. Each call gives a new
+ * object, so a node that changes its schedule does not change the schedule of another node.
+ */
+export const newTriggerSchedule = () => ({ kind: "daily", time: "09:00" }) satisfies RoutineSchedule;
 
 /** The local time zone, which a new schedule trigger runs in. */
 const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;

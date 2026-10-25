@@ -107,6 +107,11 @@ export function Port(props: {
   const armed = () => board.armed(props.node, props.side, props.type, props.branch);
   const target = () => board.accepts(props.node, props.side, props.type, props.branch);
   const refused = () => board.refused(props.node, props.side, props.type, props.branch);
+  /** A port is a toggle only while a connection is open: then a press on the armed port closes it. */
+  const pressed = () => {
+    if (!board.connecting()) return undefined;
+    return armed() ? "true" : "false";
+  };
   return (
     <span ref={slot} class="wfn-port-slot" data-side={props.side}>
       <Button
@@ -128,7 +133,7 @@ export function Port(props: {
             ? t("workflow.node.port.input", { name: name() })
             : t("workflow.node.port.output", { name: name() })
         }
-        aria-pressed={armed() ? "true" : "false"}
+        aria-pressed={pressed()}
         onPointerDown={(event: PointerEvent) => board.dragPort(props.node, props.side, props.type, event, props.branch)}
         onClick={() => board.pressPort(props.node, props.side, props.type, props.branch)}
       >

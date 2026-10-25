@@ -109,10 +109,12 @@ import { WorkflowZoomMenu } from "./WorkflowZoomMenu";
 import {
   BoardProvider,
   createBoard,
+  inCanvas,
   isEditable,
   MOD_KEY,
   type PortRef,
   resizeCursor,
+  takesKeys,
   type WfnEdge,
   type WfnHandle,
   type WfnPoint,
@@ -127,7 +129,7 @@ import {
   createCanvasHistory,
   graphFromSnapshot,
   hostDefaults,
-  NEW_TRIGGER_SCHEDULE,
+  newTriggerSchedule,
   snapshotFromGraph,
   stableJson,
 } from "./workflow-history";
@@ -192,7 +194,8 @@ export interface WorkflowCanvasProps {
   onStopStep: (stepId: string) => void;
   onStopRun: (runId: string) => void;
   onRetry: (stepId: string) => void;
-  onDecide: (stepId: string, approved: boolean) => void;
+  /** Sends the answer of an approval. A promise that rejects shows the approval again. */
+  onDecide: (stepId: string, approved: boolean) => void | Promise<unknown>;
   /**
    * Makes a new signing secret for a webhook trigger, after the graph that has the trigger is saved.
    * The first secret also makes the address. Without it, a webhook trigger offers no secret.
@@ -303,6 +306,21 @@ const SNAP = 8;
 const GRID = 20;
 /** How far a copy sits from its original. */
 const DUPLICATE_OFFSET = 32;
+/** The fields of each kind that hold text that the user wrote, in the order that the card shows them. */
+const SEARCH_FIELDS: Record<WorkflowNodeKind, readonly string[]> = {
+  trigger: [],
+  prompt: ["text"],
+  asset: ["file"],
+  llm: ["prompt", "system"],
+  agent: ["task"],
+  image: ["prompt"],
+  condition: ["rule"],
+  approval: ["question"],
+  output: ["path", "title"],
+  text: ["text"],
+  note: ["text"],
+  shape: ["text"],
+};
 /** The arrow keys move the selection by one snap step, or by four with Shift. */
 const NUDGE = { step: SNAP, large: SNAP * 4 };
 /** A box edge or centre this close to another one, in screen pixels, snaps to it and shows a guide. */
@@ -517,6 +535,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   const stepOf = (id: string) => runIndex().get(id)?.step.id;
 
   let viewport: HTMLElement | undefined;
+  /** The canvas with its bars. Its keys act only when the focus is in it, in its menus or on the page. */
+  let root: HTMLElement | undefined;
   let cameraMoved = false;
   /** False until the first render is on screen, so the first nodes do not come in. */
   let settled = false;
@@ -574,6 +594,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     resetSize: (id) => resetSize(id),
     fresh: () => settled,
     beforeChange: () => commit(),
+    canChange: () => !frozen() && !deleted(),
+    root: () => root,
     retry: (id) => {
       const step = stepOf(id);
       if (step) props.onRetry(step);
@@ -609,8 +631,9 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     },
     decide: (id, approved) => {
       const step = stepOf(id);
-      if (step && statusOf(id) === "approval") props.onDecide(step, approved);
+      return step && statusOf(id) === "approval" ? props.onDecide(step, approved) : undefined;
     },
+    step: stepOf,
     edgeTone: (edge) => {
       const viewing = viewedRun();
       if (viewing) return ranIn(edge.from, viewing) && ranIn(edge.to, viewing) ? "done" : "idle";
@@ -673,7 +696,39 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       scheduleEdit = undefined;
     },
   });
-  const { steps, commit, undo, redo } = edits;
+  const { steps, commit } = edits;
+
+  /** The layout frames that wait to place a new node, each with what to do when it drops. */
+  const frames = new Map<number, () => void>();
+  /** Runs `run` after the next layout. When undo or unmount drops the frame first, `drop` runs in its place. */
+  const afterLayout = (run: () => void, drop: () => void = () => {}) => {
+    const frame = requestAnimationFrame(() => {
+      frames.delete(frame);
+      run();
+    });
+    frames.set(frame, drop);
+  };
+  const dropFrames = () => {
+    for (const [frame, drop] of frames) {
+      cancelAnimationFrame(frame);
+      drop();
+    }
+    frames.clear();
+  };
+  onCleanup(dropFrames);
+  /** Ends a drag on the canvas with no change. The gesture code sets it when the canvas is on screen. */
+  let stopGesture = () => {};
+  /** A drag or a frame that is still open must not change the canvas after an undo or a redo. */
+  const undo = () => {
+    stopGesture();
+    dropFrames();
+    edits.undo();
+  };
+  const redo = () => {
+    stopGesture();
+    dropFrames();
+    edits.redo();
+  };
 
   /* --------------------------------------------------------- Versions */
 
@@ -1161,18 +1216,25 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     };
   };
 
-  /** Adds a node with its top-left corner at a world point, or centred in the view. */
+  /**
+   * Adds a node with its top-left corner at a world point, or centred in the view. A node centred in the
+   * view steps down and to the right past the nodes that already sit there, so it does not hide them.
+   */
   const addNode = (kind: WorkflowNodeKind, point?: WfnPoint): string => {
     commit();
     const { width, height } = view();
     const center = toWorld({ x: width / 2, y: height / 2 });
     const id = `${kind}-${crypto.randomUUID()}`;
-    const at = snapPoint(point ?? { x: center.x - 150, y: center.y - 120 });
+    let at = snapPoint(point ?? { x: center.x - 150, y: center.y - 120 });
+    if (!point) {
+      const taken = untrack(() => new Set(live().map((node) => `${positions[node.id]?.x},${positions[node.id]?.y}`)));
+      while (taken.has(`${at.x},${at.y}`)) at = { x: at.x + DUPLICATE_OFFSET, y: at.y + DUPLICATE_OFFSET };
+    }
     setPositions((draft) => {
       draft[id] = at;
     });
     canvas.putFields(id, hostDefaults(kind, props.catalogs, props.features));
-    setNodes((list) => [...list, kind === "trigger" ? { id, kind, schedule: NEW_TRIGGER_SCHEDULE } : { id, kind }]);
+    setNodes((list) => [...list, kind === "trigger" ? { id, kind, schedule: newTriggerSchedule() } : { id, kind }]);
     return id;
   };
 
@@ -1193,11 +1255,17 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       setSizes((draft) => {
         draft[id] = { ...size };
       });
-    canvas.putFields(id, tool === "note" ? { tone: ui.note } : { shape: ui.shape, color: ui.fill });
+    const writer = props.catalogs.self;
+    canvas.putFields(
+      id,
+      tool === "note"
+        ? { tone: ui.note, ...(writer ? { authorName: writer } : {}) }
+        : { shape: ui.shape, color: ui.fill },
+    );
     setNodes((list) => [...list, { id, kind: tool }]);
     setGhost(null);
     setTool("select");
-    requestAnimationFrame(() => {
+    afterLayout(() => {
       const element = slot(id);
       // A label above the card moves the node up by its height, so the card stays in place. The layout
       // offset is in world pixels, and the enter animation that scales the card does not change it.
@@ -1402,7 +1470,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     commit();
     const release = edits.join();
     const id = addNode(kind, open.at);
-    requestAnimationFrame(() => {
+    afterLayout(() => {
       const element = slot(id);
       const side = start.side === "out" ? "in" : "out";
       const port = element?.querySelector(
@@ -1422,7 +1490,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       canvas.attach(start, id);
       canvas.select([id]);
       release();
-    });
+    }, release);
   };
 
   /**
@@ -1433,7 +1501,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     commit();
     const release = edits.join();
     const id = addNode(kind, at);
-    requestAnimationFrame(() => {
+    afterLayout(() => {
       const element = slot(id);
       const from = boxOf(edge.from);
       const to = positions[edge.to];
@@ -1459,7 +1527,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       canvas.splice(edge.id, id);
       canvas.select([id]);
       release();
-    });
+    }, release);
   };
 
   /** Puts nodes on the system clipboard, as ⌘C does, so that ⌘V and other canvases can paste them. */
@@ -1577,14 +1645,15 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     return index < 0 ? undefined : order[index + step];
   };
 
-  /** The texts that search looks in: the label of a node, then the values of its fields. */
+  /** The texts that search looks in: the name of the kind of a node, then the text that its fields hold. */
   const searchTexts = (id: string) => {
-    const element = slot(id);
-    if (!element) return [];
-    const fields = [...element.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].map(
-      (field) => field.value,
-    );
-    return [element.querySelector("[data-node-id]")?.getAttribute("aria-label") ?? "", ...fields];
+    const kind = kindOf(id);
+    if (!kind) return [];
+    const fields = SEARCH_FIELDS[kind].map((key) => {
+      const value = board.field(id, key);
+      return typeof value === "string" ? value : "";
+    });
+    return [t(KIND_LABEL[kind]), ...fields];
   };
   /** Each match shows the field that holds the words, or its first field when only the label matches. */
   const matches = () => {
@@ -1972,7 +2041,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       }
       return { delta, guides };
     };
-    const onUp = (event: PointerEvent) => {
+    /** Ends the gesture and gives it back. */
+    const endGesture = () => {
       const current = gesture;
       gesture = undefined;
       setGesturing(false);
@@ -1985,6 +2055,19 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       if (current?.kind === "resize") delete current.element.dataset.resizing;
       setMarquee(undefined);
       setGuides([]);
+      return current;
+    };
+    stopGesture = () => {
+      const current = endGesture();
+      if (current?.kind === "place") setDrawn(null);
+      if (current?.kind === "draw" || current?.kind === "erase")
+        setInk((draft) => {
+          draft.sketch = null;
+          draft.erasing = [];
+        });
+    };
+    const onUp = (event: PointerEvent) => {
+      const current = endGesture();
       if (!current) return;
       if (current.kind === "draw") {
         const stroke = { ...current.stroke, points: current.points };
@@ -2234,7 +2317,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       const owner =
         active instanceof HTMLElement ? active.closest<HTMLElement>("[data-node-id]")?.dataset.nodeId : undefined;
       const ids = copying ?? (owner ? targets(owner) : group());
-      if (deleted() || (!copying && selectsText()) || ids.length === 0 || !event.clipboardData) return;
+      if (deleted() || !inCanvas(root, active) || (!copying && selectsText())) return;
+      if (ids.length === 0 || !event.clipboardData) return;
       const clip = collect(ids);
       if (clip.nodes.length === 0) return;
       event.preventDefault();
@@ -2247,7 +2331,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     /** ⌘V pastes copied nodes at the pointer, also into a field, because the clipboard has no text then. */
     const onPaste = (event: ClipboardEvent) => {
       const key = event.clipboardData?.getData(CLIP_TYPE);
-      if (deleted() || frozen() || !key || copied()?.key !== key) return;
+      if (deleted() || frozen() || !inCanvas(root, document.activeElement)) return;
+      if (!key || copied()?.key !== key) return;
       event.preventDefault();
       pasteNodes(pointer && toWorld(pointer));
     };
@@ -2273,8 +2358,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
       r: () => setTool("shape"),
     };
     const onShortcut = (event: KeyboardEvent) => {
-      if (deleted()) return;
       const active = document.activeElement;
+      if (deleted() || !inCanvas(root, active)) return;
       const editing = isEditable(active);
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
@@ -2324,7 +2409,8 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
         if (event.key === "Escape" && ui.search) return closeSearch;
         if (event.key === "Escape" && (ui.tool === "draw" || placing()) && !inMenu) return () => setTool("select");
         if (event.key === "Escape" && ids.length > 0 && !inMenu && !drop()) return () => canvas.select([]);
-        return event.shiftKey ? undefined : plain[key];
+        // A menu or a list box takes letters itself, to go to an item.
+        return event.shiftKey || inMenu || takesKeys(active) ? undefined : plain[key];
       })();
       if (!action) return;
       event.preventDefault();
@@ -2374,6 +2460,7 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
   return (
     <BoardProvider board={board}>
       <main
+        ref={root}
         class="wfn-stage wfn-canvas"
         inert={deleted()}
         data-deleted={deleted() ? "" : undefined}
@@ -2388,9 +2475,11 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
           pressing = true;
           const release = () => {
             pressing = false;
+            window.removeEventListener("pointerup", release, { capture: true });
+            window.removeEventListener("pointercancel", release, { capture: true });
           };
-          window.addEventListener("pointerup", release, { once: true, capture: true });
-          window.addEventListener("pointercancel", release, { once: true, capture: true });
+          window.addEventListener("pointerup", release, { capture: true });
+          window.addEventListener("pointercancel", release, { capture: true });
           // A pan keeps the selection.
           const panning = event.button === 1 || ui.tool === "pan" || frozen() || viewport?.hasAttribute("data-space");
           if (!panning && ui.tool === "select") canvas.selectFrom(event.target, event.shiftKey);
@@ -2422,20 +2511,34 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
               <canvas.Edges />
               {/* Keyed by id, so a node keeps its element when undo or a schedule change gives a new item. */}
               <For each={nodes()} keyed={(node) => node.id}>
-                {(node) => (
-                  <div
-                    class="wfn-slot"
-                    data-slot={node().id}
-                    ref={(element) => slotResize.observe(element)}
-                    data-kind={node().kind}
-                    style={{
-                      left: `${positions[node().id]?.x ?? 0}px`,
-                      top: `${positions[node().id]?.y ?? 0}px`,
-                    }}
-                  >
-                    <CanvasNodeView node={node()} trigger={triggerOf(node().id)} />
-                  </div>
-                )}
+                {(node) => {
+                  let slotElement: HTMLElement | undefined;
+                  onCleanup(() => {
+                    const id = slotElement?.dataset.slot;
+                    if (slotElement) slotResize.unobserve(slotElement);
+                    if (id)
+                      setSlotSizes((draft) => {
+                        delete draft[id];
+                      });
+                  });
+                  return (
+                    <div
+                      class="wfn-slot"
+                      data-slot={node().id}
+                      ref={(element) => {
+                        slotElement = element;
+                        slotResize.observe(element);
+                      }}
+                      data-kind={node().kind}
+                      style={{
+                        left: `${positions[node().id]?.x ?? 0}px`,
+                        top: `${positions[node().id]?.y ?? 0}px`,
+                      }}
+                    >
+                      <CanvasNodeView node={node()} trigger={triggerOf(node().id)} />
+                    </div>
+                  );
+                }}
               </For>
               <svg class="wfn-ink" aria-hidden="true">
                 <For each={strokes()}>

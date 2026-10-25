@@ -4,7 +4,7 @@
  * the same type. Drag between an output and an input in either direction, or press one and then the other.
  */
 
-import type { RoutineSchedule } from "@openbot/contracts/ipc";
+import type { RoutineSchedule, StoredFileRow } from "@openbot/contracts/ipc";
 import type { AppTextKey, AppTranslate } from "@openbot/i18n";
 import { Button, Kbd, LabelTooltip, X } from "@openbot/ui";
 import type { JSX } from "@solidjs/web";
@@ -217,8 +217,17 @@ export interface WfnBoard {
    * node. `bar` is the size of the toolbar on the screen. Only the canvas moves it.
    */
   toolbarBelow: (id: string, bar: { width: number; height: number }) => boolean;
-  /** Tells the run what the user answered at an approval step. */
-  decide: (id: string, approved: boolean) => void;
+  /**
+   * Tells the run what the user answered at an approval step. When the promise rejects, the answer did
+   * not get to the run, and the step asks again.
+   */
+  decide: (id: string, approved: boolean) => void | Promise<unknown>;
+  /** The id of the newest step of a node, so the approval of a new run asks again. */
+  step: (id: string) => string | undefined;
+  /** The files that the user added from the computer while the board is open, newest first. */
+  uploads: () => readonly StoredFileRow[];
+  /** Adds a file from the computer to the files of the board. An image shows its own preview. */
+  upload: (file: File) => StoredFileRow;
   /** Whether the nodes show a resize handle. Only the canvas resizes them. */
   resizable: boolean;
   /** Whether a node that shows now is new, so it comes in. The nodes of the first render do not. */
@@ -285,7 +294,8 @@ export interface BoardOptions {
   stopStep?: (id: string) => void;
   running?: () => boolean;
   toolbarBelow?: (id: string, bar: { width: number; height: number }) => boolean;
-  decide?: (id: string, approved: boolean) => void;
+  decide?: (id: string, approved: boolean) => void | Promise<unknown>;
+  step?: (id: string) => string | undefined;
   /** The nodes that are locked when the story opens. */
   locked?: readonly string[] | undefined;
   /** The size the user set on a node. With it, the nodes show a resize handle. */
@@ -314,6 +324,10 @@ export interface BoardOptions {
   release?: (start: PortRef, at: WfnPoint, event: PointerEvent) => boolean;
   /** Called before each change that undo can restore: a connection, a removal or a lock. */
   beforeChange?: () => void;
+  /** False while no node can be deleted, such as when a version shows or the canvas is read-only. */
+  canChange?: () => boolean;
+  /** The element that holds the board and its controls. Delete acts only when the focus is in it or on the page. */
+  root?: () => Element | undefined;
   /**
    * The element that gets the focus after the user confirms a deletion, such as the next node. `from`
    * had the focus when the user asked to delete.
@@ -429,6 +443,27 @@ export function isEditable(element: Element | null): boolean {
   );
 }
 
+/** The roles of controls that use letter, arrow and Delete keys themselves. */
+const KEYED_CONTROL = "[role=combobox], [role=listbox], [role^=menu], [role=option]";
+
+/** True when the focus is in a control that uses keys itself, such as a menu or a list box. */
+export function takesKeys(element: Element | null): boolean {
+  return element?.closest(KEYED_CONTROL) != null;
+}
+
+/**
+ * True when a key is for the canvas: the focus is in `root`, in a menu of the canvas, or on the page.
+ * A key in another part of the app, such as the sidebar or a dialog, is not.
+ */
+export function inCanvas(root: Element | undefined, element: Element | null): boolean {
+  return (
+    element === null ||
+    element === document.body ||
+    root?.contains(element) === true ||
+    element.closest("[data-wfn-portal]") !== null
+  );
+}
+
 export function createBoard(options: BoardOptions) {
   const { t } = useText();
   const nameOf = (element: Element | null | undefined) => nodeName(element, t("workflow.board.stepFallback"));
@@ -459,6 +494,8 @@ export function createBoard(options: BoardOptions) {
   let world: HTMLElement | undefined;
   let frame = 0;
   let suppressPress = false;
+  /** Ends the connection that the pointer drags now, with no change. */
+  let stopDrag: (() => void) | undefined;
   const resize = new ResizeObserver(() => schedule());
 
   const measure = () => {
@@ -653,6 +690,7 @@ export function createBoard(options: BoardOptions) {
    * node deleted from the keyboard gives the focus to the next node.
    */
   const deleteNodes = (ids: readonly string[]) => {
+    if (options.canChange?.() === false) return;
     const gone = ids.filter((id) => !state.locked.includes(id) && !state.removed.includes(id));
     if (gone.length === 0) return;
     const next = options.focusAfterRemove?.(gone, document.activeElement);
@@ -679,6 +717,30 @@ export function createBoard(options: BoardOptions) {
       draft.results[id] = [...(draft.results[id] ?? []), result];
       draft.picked[id] = result.id;
     });
+  };
+
+  /** Files from the computer. Their previews are blob addresses, which the board frees when it closes. */
+  const [uploads, setUploads] = createSignal<readonly StoredFileRow[]>([]);
+  const upload = (file: File): StoredFileRow => {
+    const image = file.type.startsWith("image/");
+    const row: StoredFileRow = {
+      id: crypto.randomUUID(),
+      name: file.name,
+      size: file.size,
+      kind: image ? "image" : "file",
+      mimeType: file.type || "application/octet-stream",
+      previewKind: image ? "image" : file.type === "application/pdf" ? "pdf" : "none",
+      previewUrl: image ? URL.createObjectURL(file) : null,
+      source: "workspace",
+      agentId: null,
+      conversation: null,
+      messageId: null,
+      createdAt: new Date().toISOString(),
+      status: "available",
+      deletable: false,
+    };
+    setUploads((list) => [row, ...list]);
+    return row;
   };
 
   const resultsOf = (id: string): readonly WfnResult[] => options.resultsOf?.(id) ?? state.results[id] ?? [];
@@ -731,6 +793,9 @@ export function createBoard(options: BoardOptions) {
     running: () => options.running?.() ?? false,
     toolbarBelow: (id, bar) => options.toolbarBelow?.(id, bar) ?? false,
     decide: (id, approved) => options.decide?.(id, approved),
+    step: (id) => options.step?.(id),
+    uploads,
+    upload,
     resizable: options.size !== undefined,
     fresh: () => options.fresh?.() ?? false,
     size: (id) => options.size?.(id),
@@ -779,6 +844,9 @@ export function createBoard(options: BoardOptions) {
       schedule();
       return () => {
         if (ports.get(key) === entry) ports.delete(key);
+        // The node stops being measured when its last port goes.
+        if (nodeElement && ![...ports.values()].some((other) => other.node === entry.node))
+          resize.unobserve(nodeElement);
         schedule();
       };
     },
@@ -817,10 +885,14 @@ export function createBoard(options: BoardOptions) {
           draft.target = target;
         });
       };
-      const onUp = (up: PointerEvent) => {
+      const end = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
+        stopDrag = undefined;
+      };
+      const onUp = (up: PointerEvent) => {
+        end();
         if (!moved) return;
         // The click that follows this pointer-up must not arm the port again.
         suppressPress = true;
@@ -843,6 +915,8 @@ export function createBoard(options: BoardOptions) {
           if (target?.reason) draft.message = `${target.reason}.`;
         });
       };
+      stopDrag?.();
+      stopDrag = end;
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
@@ -924,6 +998,8 @@ export function createBoard(options: BoardOptions) {
    */
   const restore = (saved: BoardSnapshot) => {
     typing = null;
+    // A connection that the pointer drags would open again on the next move.
+    stopDrag?.();
     setState((draft) => {
       draft.edges = saved.edges.map((edge) => ({ ...edge }));
       draft.removed = [...saved.removed];
@@ -941,6 +1017,8 @@ export function createBoard(options: BoardOptions) {
 
   onSettled(() => {
     const onKey = (event: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (options.root && !inCanvas(options.root(), active)) return;
       if (event.key === "Escape" && (state.pending || state.edge)) {
         setState((draft) => {
           draft.pending = null;
@@ -950,7 +1028,9 @@ export function createBoard(options: BoardOptions) {
         });
         return;
       }
-      if ((event.key !== "Delete" && event.key !== "Backspace") || isEditable(document.activeElement)) return;
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (isEditable(active) || takesKeys(active) || active?.closest("[data-wfn-portal]")) return;
+      if (options.canChange?.() === false) return;
       const edge = state.edge;
       if (edge) {
         event.preventDefault();
@@ -963,8 +1043,10 @@ export function createBoard(options: BoardOptions) {
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      stopDrag?.();
       resize.disconnect();
       cancelAnimationFrame(frame);
+      for (const row of untrack(uploads)) if (row.previewUrl) URL.revokeObjectURL(row.previewUrl);
     };
   });
 

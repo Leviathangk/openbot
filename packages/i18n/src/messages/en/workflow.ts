@@ -219,7 +219,7 @@ export const messages = defineMessages("workflow", {
   "workflow.shape.oval": "Oval",
   "workflow.shape.star": "Star",
 
-  "workflow.canvas.label": "{name} workflow",
+  "workflow.canvas.label": "Workflow canvas: {name}",
   "workflow.canvas.untitled": "Untitled workflow",
   "workflow.canvas.copyOf": "{name} copy",
   "workflow.canvas.step": "Step",
@@ -275,7 +275,6 @@ export const messages = defineMessages("workflow", {
   "workflow.canvas.search.close": "Close search",
   "workflow.canvas.search.empty": "Find a step by its name, prompt or result.",
   "workflow.canvas.search.noMatch": "No step matches “{query}”.",
-  "workflow.canvas.minimap.title": "Minimap",
   "workflow.canvas.minimap.open": "Open minimap",
   "workflow.canvas.minimap.close": "Close minimap",
   "workflow.canvas.zoom.menu": "Zoom",

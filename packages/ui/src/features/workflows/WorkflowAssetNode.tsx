@@ -7,8 +7,7 @@ import { createSignal, createStore, For, onCleanup, Show, untrack } from "solid-
 import { createScrollFades } from "../../components/createScrollFades";
 import { useText } from "../../text";
 import { ImageLightbox, type ImageLightboxOpening } from "../conversation/ImageLightbox";
-import { useBoard } from "./workflow-board";
-import type { WorkflowCatalogs } from "./workflow-model";
+import { useBoard, type WfnBoard } from "./workflow-board";
 import { asString, download, NodeShell, NodeToolbar, ToolAction, useField, useLocked } from "./workflow-node-parts";
 
 /* --------------------------------------------------------------- Asset */
@@ -21,42 +20,15 @@ const ASSET_FILTERS: readonly { value: AssetFilter; label: AppTextKey }[] = [
   { value: "files", label: "workflow.asset.filter.files" },
 ];
 
-/**
- * Files that the user added from the computer in this session. They join the workspace files of the
- * catalog, newest first.
- */
-const [uploads, setUploads] = createSignal<readonly StoredFileRow[]>([]);
-const libraryFiles = (catalogs: WorkflowCatalogs) => [...uploads(), ...catalogs.files];
-
-/** Adds a file from the computer to the workspace library. An image shows its own preview. */
-function addFromDisk(file: globalThis.File): StoredFileRow {
-  const image = file.type.startsWith("image/");
-  const row: StoredFileRow = {
-    id: crypto.randomUUID(),
-    name: file.name,
-    size: file.size,
-    kind: image ? "image" : "file",
-    mimeType: file.type || "application/octet-stream",
-    previewKind: image ? "image" : file.type === "application/pdf" ? "pdf" : "none",
-    previewUrl: image ? URL.createObjectURL(file) : null,
-    source: "workspace",
-    agentId: null,
-    conversation: null,
-    messageId: null,
-    createdAt: new Date().toISOString(),
-    status: "available",
-    deletable: false,
-  };
-  setUploads((list) => [row, ...list]);
-  return row;
-}
+/** The files of the library: the files from the computer of this board, newest first, then the workspace files. */
+const libraryFiles = (board: WfnBoard) => [...board.uploads(), ...board.catalogs().files];
 
 /** The files of a drag from the computer, or none when the drag holds no files. */
 const draggedFiles = (event: DragEvent) =>
   event.dataTransfer?.types.includes("Files") ? [...event.dataTransfer.files] : [];
 
-function assetsFor(catalogs: WorkflowCatalogs, filter: AssetFilter): readonly StoredFileRow[] {
-  const available = libraryFiles(catalogs).filter((file) => file.status === "available");
+function assetsFor(board: WfnBoard, filter: AssetFilter): readonly StoredFileRow[] {
+  const available = libraryFiles(board).filter((file) => file.status === "available");
   if (filter === "images") return available.filter((file) => file.previewKind === "image");
   if (filter === "files") return available.filter((file) => file.previewKind !== "image");
   return available.slice(0, 9);
@@ -83,13 +55,11 @@ function AssetThumb(props: { file: StoredFileRow }) {
 }
 
 /** The files of one library tab whose names hold the query. Recent narrows nothing once the user searches. */
-function assetsMatching(catalogs: WorkflowCatalogs, filter: AssetFilter, query: string): readonly StoredFileRow[] {
+function assetsMatching(board: WfnBoard, filter: AssetFilter, query: string): readonly StoredFileRow[] {
   const needle = query.trim().toLowerCase();
-  if (!needle) return assetsFor(catalogs, filter);
+  if (!needle) return assetsFor(board, filter);
   const pool =
-    filter === "recent"
-      ? libraryFiles(catalogs).filter((file) => file.status === "available")
-      : assetsFor(catalogs, filter);
+    filter === "recent" ? libraryFiles(board).filter((file) => file.status === "available") : assetsFor(board, filter);
   return pool.filter((file) => file.name.toLowerCase().includes(needle));
 }
 
@@ -210,6 +180,7 @@ function LibraryGrid(props: {
 
 /** Opens the file dialog of the computer. The file goes into the workspace library. */
 function UploadButton(props: { onAdd: (file: StoredFileRow) => void }) {
+  const board = useBoard();
   const { t } = useText();
   let input: HTMLInputElement | undefined;
   return (
@@ -229,7 +200,7 @@ function UploadButton(props: { onAdd: (file: StoredFileRow) => void }) {
         onChange={(event) => {
           const chosen = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
-          if (chosen) props.onAdd(addFromDisk(chosen));
+          if (chosen) props.onAdd(board.upload(chosen));
         }}
       />
     </>
@@ -254,7 +225,7 @@ function AssetLibrary(props: { selected?: string; onPick: (file: StoredFileRow) 
           value={query()}
           onValueChange={setQuery}
           onKeyDown={(event) => {
-            const first = assetsMatching(board.catalogs(), filter(), query())[0];
+            const first = assetsMatching(board, filter(), query())[0];
             if (event.key === "Enter" && first) props.onPick(first);
           }}
         />
@@ -277,7 +248,7 @@ function AssetLibrary(props: { selected?: string; onPick: (file: StoredFileRow) 
             {(option) => (
               <SlidingTabs.Content value={option.value}>
                 <LibraryGrid
-                  files={assetsMatching(board.catalogs(), option.value, query())}
+                  files={assetsMatching(board, option.value, query())}
                   query={query()}
                   selected={props.selected}
                   onPick={props.onPick}
@@ -295,14 +266,25 @@ function AssetLibrary(props: { selected?: string; onPick: (file: StoredFileRow) 
 export function AssetNode(props: { id: string; file?: string }) {
   const board = useBoard();
   const { t, format } = useText();
-  const [fileName, setFileName] = useField(
+  const [fileName] = useField(
     () => props.id,
     "file",
     untrack(() => props.file ?? ""),
     asString,
   );
-  const file = () => libraryFiles(board.catalogs()).find((candidate) => candidate.name === fileName());
-  const setFile = (next: StoredFileRow) => setFileName(next.name);
+  const [fileId] = useField(() => props.id, "fileId", "", asString);
+  /** The file by its id, so two files with one name stay apart. A graph saved before the id finds it by name. */
+  const file = () => {
+    const files = libraryFiles(board);
+    const id = fileId();
+    return (
+      (id ? files.find((candidate) => candidate.id === id) : undefined) ??
+      files.find((candidate) => candidate.name === fileName())
+    );
+  };
+  const setFile = (next: StoredFileRow) => board.setFields(props.id, { file: next.name, fileId: next.id });
+  /** Files from the computer stay on this computer, so a host that cannot read them does not offer them. */
+  const uploads = () => board.features()?.uploads !== false;
   const [open, setOpen] = createSignal(false);
   const [locked, setLocked] = useLocked(() => props.id);
   const [viewer, setViewer] = createSignal<ImageLightboxOpening>();
@@ -312,9 +294,9 @@ export function AssetNode(props: { id: string; file?: string }) {
   const onDrop = (event: DragEvent) => {
     setDropping(false);
     const [dropped] = draggedFiles(event);
-    if (!dropped || locked()) return;
+    if (!dropped || locked() || !uploads()) return;
     event.preventDefault();
-    setFile(addFromDisk(dropped));
+    setFile(board.upload(dropped));
     setOpen(false);
   };
   return (
@@ -370,7 +352,7 @@ export function AssetNode(props: { id: string; file?: string }) {
             disabled={locked()}
             data-dropping={dropping() ? "" : undefined}
             onDragOver={(event: DragEvent) => {
-              if (locked() || !event.dataTransfer?.types.includes("Files")) return;
+              if (locked() || !uploads() || !event.dataTransfer?.types.includes("Files")) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "copy";
               setDropping(true);
@@ -413,12 +395,14 @@ export function AssetNode(props: { id: string; file?: string }) {
             <Popover.Content class="ui-popover-menu-surface wfn-popover" data-wfn-portal="">
               <div class="wfn-popover-head">
                 <Popover.Title class="wfn-popover-title">{t("workflow.asset.library")}</Popover.Title>
-                <UploadButton
-                  onAdd={(next) => {
-                    setFile(next);
-                    setOpen(false);
-                  }}
-                />
+                <Show when={uploads()}>
+                  <UploadButton
+                    onAdd={(next) => {
+                      setFile(next);
+                      setOpen(false);
+                    }}
+                  />
+                </Show>
               </div>
               <AssetLibrary
                 selected={file()?.id}

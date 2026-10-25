@@ -111,7 +111,7 @@ function AgentPill(props: {
 export function AgentNode(props: { id: string; agentId?: string; task?: string }) {
   const board = useBoard();
   const { t } = useText();
-  const [agentId, setAgentId] = useField(
+  const [agentId] = useField(
     () => props.id,
     "agentId",
     untrack(() => props.agentId ?? board.catalogs().agents[0]?.id ?? ""),
@@ -119,13 +119,8 @@ export function AgentNode(props: { id: string; agentId?: string; task?: string }
   );
   const agent = () => board.catalogs().agents.find((candidate) => candidate.id === agentId());
   const first = untrack(agent);
-  const [model, setModel] = useField<AgentModelId>(() => props.id, "model", first?.model ?? "", asString);
-  const [provider, setProvider] = useField<WfProvider>(
-    () => props.id,
-    "provider",
-    first?.provider ?? "codex",
-    asProvider,
-  );
+  const [model] = useField<AgentModelId>(() => props.id, "model", first?.model ?? "", asString);
+  const [provider] = useField<WfProvider>(() => props.id, "provider", first?.provider ?? "codex", asProvider);
   const [task, setTask] = useTextField(
     () => props.id,
     "task",
@@ -170,21 +165,16 @@ export function AgentNode(props: { id: string; agentId?: string; task?: string }
             agent={agent()}
             removed={agentId() !== "" && !agent()}
             disabled={locked()}
-            onChange={(choice) => {
-              setAgentId(choice.id);
-              setModel(choice.model);
-              setProvider(choice.provider);
-            }}
+            onChange={(choice) =>
+              board.setFields(props.id, { agentId: choice.id, model: choice.model, provider: choice.provider })
+            }
           />
           <Show when={agent()}>
             <ModelPill
               provider={provider()}
               value={model()}
               disabled={locked()}
-              onChange={(next, nextProvider) => {
-                setModel(next);
-                setProvider(nextProvider);
-              }}
+              onChange={(next, nextProvider) => board.setFields(props.id, { model: next, provider: nextProvider })}
             />
           </Show>
         </div>

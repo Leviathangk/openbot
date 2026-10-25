@@ -220,7 +220,7 @@ export const messages = {
   "workflow.shape.oval": "Oval",
   "workflow.shape.star": "Yıldız",
 
-  "workflow.canvas.label": "{name} iş akışı",
+  "workflow.canvas.label": "İş akışı tuvali: {name}",
   "workflow.canvas.untitled": "Adsız iş akışı",
   "workflow.canvas.copyOf": "{name} kopyası",
   "workflow.canvas.step": "Adım",
@@ -276,7 +276,6 @@ export const messages = {
   "workflow.canvas.search.close": "Aramayı kapat",
   "workflow.canvas.search.empty": "Bir adımı adına, istemine veya sonucuna göre bulun.",
   "workflow.canvas.search.noMatch": "“{query}” ile eşleşen adım yok.",
-  "workflow.canvas.minimap.title": "Mini harita",
   "workflow.canvas.minimap.open": "Mini haritayı aç",
   "workflow.canvas.minimap.close": "Mini haritayı kapat",
   "workflow.canvas.zoom.menu": "Yakınlaştırma",

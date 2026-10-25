@@ -22,7 +22,7 @@ import { useText } from "../../text";
 import { RoutineSchedulePicker } from "../conversation/RoutineSchedulePicker";
 import { RoutineWebhookSecretField } from "../conversation/RoutineWebhookEndpoint";
 import { useBoard } from "./workflow-board";
-import { NEW_TRIGGER_SCHEDULE, stableJson } from "./workflow-history";
+import { newTriggerSchedule, stableJson } from "./workflow-history";
 import {
   type Choice,
   ChoicePill,
@@ -92,7 +92,7 @@ export function TriggerNode(props: {
    */
   const [edited, setEdited] = createSignal<RoutineScheduleDraft>();
   const schedule = () => {
-    const saved = board.schedule(props.id) ?? NEW_TRIGGER_SCHEDULE;
+    const saved = board.schedule(props.id) ?? newTriggerSchedule();
     const draft = edited();
     return draft && stableJson(routineScheduleFromDraft(draft)) === stableJson(saved)
       ? draft

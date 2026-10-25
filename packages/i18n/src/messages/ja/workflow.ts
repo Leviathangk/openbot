@@ -220,7 +220,7 @@ export const messages = {
   "workflow.shape.oval": "楕円",
   "workflow.shape.star": "星",
 
-  "workflow.canvas.label": "{name} のワークフロー",
+  "workflow.canvas.label": "ワークフローキャンバス: {name}",
   "workflow.canvas.untitled": "無題のワークフロー",
   "workflow.canvas.copyOf": "{name} のコピー",
   "workflow.canvas.step": "ステップ",
@@ -276,7 +276,6 @@ export const messages = {
   "workflow.canvas.search.close": "検索を閉じる",
   "workflow.canvas.search.empty": "名前、プロンプト、結果からステップを探せます。",
   "workflow.canvas.search.noMatch": "「{query}」に一致するステップはありません。",
-  "workflow.canvas.minimap.title": "ミニマップ",
   "workflow.canvas.minimap.open": "ミニマップを開く",
   "workflow.canvas.minimap.close": "ミニマップを閉じる",
   "workflow.canvas.zoom.menu": "ズーム",

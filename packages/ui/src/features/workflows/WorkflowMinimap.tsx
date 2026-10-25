@@ -2,7 +2,6 @@
 
 import type { WorkflowNodeKind } from "@openbot/contracts/ipc";
 import { For } from "solid-js";
-import { useText } from "../../text";
 import type { WfnPoint } from "./workflow-board";
 import { type Box, inkPath, type Stroke, strokeBox } from "./workflow-ink";
 import { colorVar } from "./workflow-node-parts";
@@ -65,10 +64,10 @@ export function WorkflowMinimap(props: {
   /** A press, and a drag with the button down, in minimap pixels. */
   onPan: (event: PointerEvent & { currentTarget: SVGSVGElement }) => void;
 }) {
-  const { t } = useText();
   return (
     <div class="wfn-hud wfn-minimap" aria-hidden="true">
       <svg
+        aria-hidden="true"
         width={MINIMAP.width}
         height={MINIMAP.height}
         viewBox={`0 0 ${MINIMAP.width} ${MINIMAP.height}`}
@@ -80,7 +79,6 @@ export function WorkflowMinimap(props: {
           if (event.buttons === 1) props.onPan(event);
         }}
       >
-        <title>{t("workflow.canvas.minimap.title")}</title>
         {/* Keyed by node, so a camera move changes the boxes and does not make new ones. */}
         <For each={props.map.nodes} keyed={(box) => box.id}>
           {(box) => (

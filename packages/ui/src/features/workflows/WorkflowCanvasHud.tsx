@@ -24,7 +24,7 @@ import {
   X,
 } from "@openbot/ui";
 import type { JSX } from "@solidjs/web";
-import { For, Show } from "solid-js";
+import { createMemo, For, Show, untrack } from "solid-js";
 import { useText } from "../../text";
 import { Hint, MOD_KEY } from "./workflow-board";
 import { type CanvasColor, colorVar } from "./workflow-node-parts";
@@ -157,6 +157,18 @@ export function WorkflowCanvasHeader(props: {
       : status === "failed"
         ? t("workflow.canvas.status.failed")
         : t("workflow.canvas.status.running");
+  /** The step and status that the status region reads. A new name or count alone does not speak again. */
+  const spoken = createMemo(() => {
+    const step = props.previewing ? undefined : props.step;
+    return step ? `${step.id}\u0000${step.status}` : "";
+  });
+  const announcement = createMemo(() => {
+    if (!spoken()) return undefined;
+    return untrack(() => {
+      const step = props.step;
+      return step && { verb: statusVerb(step.status), name: step.name };
+    });
+  });
   return (
     <header class={props.frame === "window" ? "wfn-hud-top window-drag" : "wfn-hud-top"}>
       <div class="wfn-hud wfn-hud-title" style={{ "--wfn-hud-order": 0 }}>
@@ -220,7 +232,17 @@ export function WorkflowCanvasHeader(props: {
             </div>
           )}
         </Show>
-        <div class="wfn-hud-live" role="status">
+        <div class="sr-only" role="status">
+          <Show when={announcement()}>
+            {(said) => (
+              <>
+                <div>{said().verb}</div>
+                <div>{said().name}</div>
+              </>
+            )}
+          </Show>
+        </div>
+        <div class="wfn-hud-live">
           <Show when={!props.previewing && props.step}>
             {(step) => (
               <div class="wfn-hud wfn-hud-status" data-status={step().status}>

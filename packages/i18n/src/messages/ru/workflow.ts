@@ -225,7 +225,7 @@ export const messages = {
   "workflow.shape.oval": "Овал",
   "workflow.shape.star": "Звезда",
 
-  "workflow.canvas.label": "Рабочий процесс «{name}»",
+  "workflow.canvas.label": "Холст рабочего процесса: {name}",
   "workflow.canvas.untitled": "Рабочий процесс без названия",
   "workflow.canvas.copyOf": "{name} (копия)",
   "workflow.canvas.step": "Шаг",
@@ -286,7 +286,6 @@ export const messages = {
   "workflow.canvas.search.close": "Закрыть поиск",
   "workflow.canvas.search.empty": "Найдите шаг по названию, промпту или результату.",
   "workflow.canvas.search.noMatch": "Нет шагов по запросу «{query}».",
-  "workflow.canvas.minimap.title": "Миникарта",
   "workflow.canvas.minimap.open": "Открыть миникарту",
   "workflow.canvas.minimap.close": "Закрыть миникарту",
   "workflow.canvas.zoom.menu": "Масштаб",

@@ -225,7 +225,7 @@ export const messages = {
   "workflow.shape.oval": "Owal",
   "workflow.shape.star": "Gwiazda",
 
-  "workflow.canvas.label": "Przepływ pracy: {name}",
+  "workflow.canvas.label": "Kanwa przepływu pracy: {name}",
   "workflow.canvas.untitled": "Przepływ bez nazwy",
   "workflow.canvas.copyOf": "{name} – kopia",
   "workflow.canvas.step": "Krok",
@@ -286,7 +286,6 @@ export const messages = {
   "workflow.canvas.search.close": "Zamknij wyszukiwanie",
   "workflow.canvas.search.empty": "Znajdź krok po nazwie, prompcie lub wyniku.",
   "workflow.canvas.search.noMatch": "Żaden krok nie pasuje do „{query}”.",
-  "workflow.canvas.minimap.title": "Minimapa",
   "workflow.canvas.minimap.open": "Otwórz minimapę",
   "workflow.canvas.minimap.close": "Zamknij minimapę",
   "workflow.canvas.zoom.menu": "Powiększenie",
