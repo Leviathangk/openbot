@@ -14,7 +14,7 @@ The flow is: signed request → route → routine → run.
 | Data | Owner | Where |
 | --- | --- | --- |
 | Trigger, route ID, encrypted secret, URL | Host SQLite | `projection_routine_webhooks`, `projection_channel_routine_webhooks` |
-| Workflow trigger route ID, encrypted secret, URL | Host SQLite | `workflow_trigger_webhooks` (schema v45) |
+| Workflow trigger route ID, encrypted secret, URL | Host SQLite | `workflow_trigger_webhooks` (schema v46) |
 | Receipts (no body) | Host SQLite | `projection_webhook_receipts`, `workflow_webhook_receipts` |
 | Routes to revoke on the relay | Host SQLite | `projection_webhook_route_revocations` |
 | Route ID → host and owner account, link time, revoke time | Account service D1 | `webhook_routes` |

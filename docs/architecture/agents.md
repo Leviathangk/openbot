@@ -186,7 +186,7 @@ changed, on this computer and on a joined host.
   `src/renderer/src/features/workflows/` holds `WorkflowsPage.tsx` and `workflows-port.ts`, the
   port over `window.openbot.workflows`. The page saves the graph 400 ms after the last edit, one save
   at a time on its base revision, and loads the graph again after a change from another device.
-- `src/backend/workflows/` owns the tables of migration 45: workflows, nodes, edges, versions,
+- `src/backend/workflows/` owns the tables of migration 46: workflows, nodes, edges, versions,
   triggers, webhook triggers and receipts, runs, steps and output posts. The rows are written
   directly, not through `dispatch`, as for routine flows. `workflow-graph.ts` checks the graph rules
   (no cycles, branch edges only from a condition, port types, limits). A save with an old revision
