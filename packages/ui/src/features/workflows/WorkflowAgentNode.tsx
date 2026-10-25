@@ -118,9 +118,13 @@ export function AgentNode(props: { id: string; agentId?: string; task?: string }
     asString,
   );
   const agent = () => board.catalogs().agents.find((candidate) => candidate.id === agentId());
-  const first = untrack(agent);
-  const [model] = useField<AgentModelId>(() => props.id, "model", first?.model ?? "", asString);
-  const [provider] = useField<WfProvider>(() => props.id, "provider", first?.provider ?? "codex", asProvider);
+  // The catalog agent is a store, so its fields too are read once here.
+  const first = untrack(() => {
+    const found = agent();
+    return { model: found?.model ?? "", provider: found?.provider ?? "codex" };
+  });
+  const [model] = useField<AgentModelId>(() => props.id, "model", first.model, asString);
+  const [provider] = useField<WfProvider>(() => props.id, "provider", first.provider, asProvider);
   const [task, setTask] = useTextField(
     () => props.id,
     "task",
