@@ -306,6 +306,8 @@ const SNAP = 8;
 const GRID = 20;
 /** How far a copy sits from its original. */
 const DUPLICATE_OFFSET = 32;
+/** The room that a new node takes before it renders and has a measured size. */
+const NEW_NODE = { width: 300, height: 240 };
 /** The fields of each kind that hold text that the user wrote, in the order that the card shows them. */
 const SEARCH_FIELDS: Record<WorkflowNodeKind, readonly string[]> = {
   trigger: [],
@@ -989,6 +991,11 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
     closeDrop();
     closeSearch();
     setNodes(snapshot.nodes);
+    // Only a reset unmounts a node: undo keeps it mounted but removed.
+    const kept = new Set(snapshot.nodes.map((node) => node.id));
+    setSlotSizes((draft) => {
+      for (const id of Object.keys(draft)) if (!kept.has(id)) delete draft[id];
+    });
     putPlaces(snapshot);
     canvas.restore(snapshot.board);
     setStrokes(snapshot.strokes);
@@ -1243,17 +1250,23 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
 
   /**
    * Adds a node with its top-left corner at a world point, or centred in the view. A node centred in the
-   * view steps down and to the right past the nodes that already sit there, so it does not hide them.
+   * view moves to the right past each card that it would cover, so it does not hide them.
    */
   const addNode = (kind: WorkflowNodeKind, point?: WfnPoint): string => {
     commit();
     const { width, height } = view();
     const center = toWorld({ x: width / 2, y: height / 2 });
     const id = `${kind}-${crypto.randomUUID()}`;
-    let at = snapPoint(point ?? { x: center.x - 150, y: center.y - 120 });
+    let at = snapPoint(point ?? { x: center.x - NEW_NODE.width / 2, y: center.y - NEW_NODE.height / 2 });
     if (!point) {
-      const taken = untrack(() => new Set(live().map((node) => `${positions[node.id]?.x},${positions[node.id]?.y}`)));
-      while (taken.has(`${at.x},${at.y}`)) at = { x: at.x + DUPLICATE_OFFSET, y: at.y + DUPLICATE_OFFSET };
+      const cards = untrack(() =>
+        boxesOf(live().flatMap((node) => (node.kind === "text" || node.kind === "shape" ? [] : [node.id]))),
+      );
+      // Each move passes one card, so the loop ends after one move for each card at most.
+      for (let hit = cards.find((box) => overlaps({ ...at, ...NEW_NODE }, box)); hit; ) {
+        at = snapPoint({ x: hit.x + hit.width + GRID * 2, y: at.y });
+        hit = cards.find((box) => overlaps({ ...at, ...NEW_NODE }, box));
+      }
     }
     setPositions((draft) => {
       draft[id] = at;
@@ -2522,13 +2535,9 @@ export function WorkflowCanvas(props: WorkflowCanvasProps) {
               <For each={nodes()} keyed={(node) => node.id}>
                 {(node) => {
                   let slotElement: HTMLElement | undefined;
+                  // A cleanup runs while the list updates, where a write halts Solid: `reset` drops the size.
                   onCleanup(() => {
-                    const id = slotElement?.dataset.slot;
                     if (slotElement) slotResize.unobserve(slotElement);
-                    if (id)
-                      setSlotSizes((draft) => {
-                        delete draft[id];
-                      });
                   });
                   return (
                     <div

@@ -205,8 +205,11 @@ export function createWorkflowsController(host: WorkflowHost) {
     };
   });
 
-  readPlaces();
-  readLevels();
+  // The host reads the server role once for each call; a change event reads again.
+  untrack(() => {
+    readPlaces();
+    readLevels();
+  });
   write(async () => {
     const list = await host.workflows.list();
     const first = list[0] ?? (await host.workflows.create({ title: t("workflow.canvas.untitled") })).summary;
