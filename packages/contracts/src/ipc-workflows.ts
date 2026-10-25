@@ -113,15 +113,7 @@ export interface WorkflowGraph {
 export const WORKFLOW_RUN_STATUSES = ["running", "approval", "stopping", "done", "failed", "stopped"] as const;
 export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
 
-export const WORKFLOW_STEP_STATUSES = [
-  "waiting",
-  "running",
-  "approval",
-  "done",
-  "failed",
-  "stopped",
-  "skipped",
-] as const;
+export const WORKFLOW_STEP_STATUSES = ["running", "approval", "done", "failed", "stopped", "skipped"] as const;
 export type WorkflowStepStatus = (typeof WORKFLOW_STEP_STATUSES)[number];
 
 export const WORKFLOW_RUN_SOURCES = ["manual", "schedule", "webhook"] as const;

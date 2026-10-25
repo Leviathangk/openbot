@@ -52,7 +52,6 @@ export interface WorkflowNodeRunState {
 const OPEN_RUN_STATUSES: readonly WorkflowRunStatus[] = ["running", "approval", "stopping"];
 
 const NODE_STATUS = {
-  waiting: "waiting",
   running: "running",
   approval: "approval",
   done: "done",

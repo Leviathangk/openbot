@@ -190,7 +190,7 @@ const step = fields({
   nodeId: identifier,
   attempt: count,
   agentId: nullable(identifier),
-  status: oneOf("waiting", "running", "approval", "done", "failed", "stopped", "skipped"),
+  status: oneOf("running", "approval", "done", "failed", "stopped", "skipped"),
   output: nullable(stepText),
   branch: nullable(oneOf("yes", "no")),
   error: nullable(stepText),

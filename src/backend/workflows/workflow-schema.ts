@@ -21,17 +21,19 @@
 // `workflow_versions`: graph snapshots for the version history. `kind` is `auto` for a save, `restore`
 // for the state before a restore, and `run` for the graph a run started from.
 //
-// `workflow_triggers`: one row per trigger node. `next_due_at` is the next schedule occurrence;
-// `last_scheduled_for` the last one that started a run. `workflow_trigger_webhooks` holds the relay
+// `workflow_triggers`: one row per trigger node. `next_due_at` is the next schedule occurrence.
+// `workflow_trigger_webhooks` holds the relay
 // route of a webhook trigger; a removed route goes to `projection_webhook_route_revocations`.
-// `workflow_webhook_receipts` records each received delivery once, so a repeat is a no-op.
+// `workflow_webhook_receipts` records each received delivery once, so a repeat is a no-op. An ignored
+// delivery is `busy` (a run was open) or `refused` (the run could not start).
 //
 // `workflow_runs`: one run. `trigger_node_id` is null for a run the user started without a trigger.
 // `graph_json` is the graph the run started from, so an edit during the run does not change it.
 // `idempotency_key` is the request id of a manual run, or `workflow:<node>:<scheduled for>` and
-// `webhook:<node>:<delivery>` for the others.
+// `webhook:<node>:<delivery>` for the others. It is unique in its workflow only, so a copy of a
+// workflow, which keeps the node ids, starts its own runs.
 //
-// `workflow_steps`: one attempt of one node. `run_id` is null for a step the user ran alone.
+// `workflow_steps`: one attempt of one step node. `run_id` is null for a step the user ran alone.
 // `delivery_id` and `turn_id` belong to an agent step, whose answer comes from that turn.
 //
 // `workflow_output_deliveries`: one output step's post to a messaging place, with the same status
@@ -93,17 +95,15 @@ export const WORKFLOW_SCHEMA_SQL = `
     workflow_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('manual', 'schedule', 'webhook')),
-    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
     timezone TEXT,
     schedule_json TEXT CHECK(schedule_json IS NULL OR json_valid(schedule_json)),
     next_due_at TEXT,
-    last_scheduled_for TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY(workflow_id, node_id),
     FOREIGN KEY(workflow_id, node_id) REFERENCES workflow_nodes(workflow_id, node_id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS workflow_triggers_due
-    ON workflow_triggers(next_due_at) WHERE enabled = 1 AND next_due_at IS NOT NULL;
+    ON workflow_triggers(next_due_at) WHERE next_due_at IS NOT NULL;
   CREATE TABLE IF NOT EXISTS workflow_trigger_webhooks (
     workflow_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -121,7 +121,7 @@ export const WORKFLOW_SCHEMA_SQL = `
     node_id TEXT NOT NULL,
     delivery_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('started', 'ignored')),
-    reason TEXT CHECK(reason IS NULL OR reason IN ('inactive', 'busy')),
+    reason TEXT CHECK(reason IS NULL OR reason IN ('busy', 'refused')),
     run_id TEXT,
     received_at TEXT NOT NULL,
     UNIQUE(workflow_id, node_id, delivery_id)
@@ -135,7 +135,7 @@ export const WORKFLOW_SCHEMA_SQL = `
     from_node_id TEXT,
     source TEXT NOT NULL CHECK(source IN ('manual', 'schedule', 'webhook')),
     scheduled_for TEXT,
-    idempotency_key TEXT NOT NULL UNIQUE,
+    idempotency_key TEXT NOT NULL,
     graph_revision INTEGER NOT NULL CHECK(graph_revision >= 0),
     graph_json TEXT NOT NULL CHECK(json_valid(graph_json)),
     payload TEXT,
@@ -144,7 +144,8 @@ export const WORKFLOW_SCHEMA_SQL = `
     started_at TEXT NOT NULL,
     ended_at TEXT,
     updated_at TEXT NOT NULL,
-    UNIQUE(workflow_id, number)
+    UNIQUE(workflow_id, number),
+    UNIQUE(workflow_id, idempotency_key)
   );
   CREATE INDEX IF NOT EXISTS workflow_runs_recent ON workflow_runs(workflow_id, started_at DESC, run_id);
   CREATE INDEX IF NOT EXISTS workflow_runs_open
@@ -155,10 +156,11 @@ export const WORKFLOW_SCHEMA_SQL = `
     run_id TEXT REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
     node_id TEXT NOT NULL,
     attempt INTEGER NOT NULL CHECK(attempt >= 1),
-    request_id TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('prompt', 'asset', 'llm', 'agent', 'image', 'trigger', 'condition', 'approval',
+      'output')),
     agent_id TEXT,
-    status TEXT NOT NULL CHECK(status IN ('waiting', 'running', 'approval', 'done', 'failed', 'stopped', 'skipped')),
+    status TEXT NOT NULL CHECK(status IN ('running', 'approval', 'done', 'failed', 'stopped', 'skipped')),
     delivery_id TEXT,
     turn_id TEXT,
     input TEXT NOT NULL DEFAULT '',
@@ -168,7 +170,8 @@ export const WORKFLOW_SCHEMA_SQL = `
     started_at TEXT,
     ended_at TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    UNIQUE(workflow_id, request_id)
   );
   CREATE UNIQUE INDEX IF NOT EXISTS workflow_steps_attempt
     ON workflow_steps(run_id, node_id, attempt) WHERE run_id IS NOT NULL;
@@ -177,7 +180,7 @@ export const WORKFLOW_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS workflow_steps_solo
     ON workflow_steps(workflow_id, created_at DESC, step_id) WHERE run_id IS NULL;
   CREATE INDEX IF NOT EXISTS workflow_steps_open
-    ON workflow_steps(status) WHERE status IN ('waiting', 'running', 'approval');
+    ON workflow_steps(status) WHERE status IN ('running', 'approval');
   CREATE INDEX IF NOT EXISTS workflow_steps_agent ON workflow_steps(agent_id) WHERE agent_id IS NOT NULL;
   CREATE TABLE IF NOT EXISTS workflow_output_deliveries (
     step_id TEXT PRIMARY KEY REFERENCES workflow_steps(step_id) ON DELETE CASCADE,
@@ -187,12 +190,8 @@ export const WORKFLOW_SCHEMA_SQL = `
     status TEXT NOT NULL CHECK(status IN ('pending', 'sending', 'sent', 'failed', 'uncertain')),
     reason TEXT,
     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
-    next_attempt_at TEXT,
-    expires_at TEXT,
     sent_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS workflow_output_deliveries_status
-    ON workflow_output_deliveries(status, next_attempt_at);
 `;

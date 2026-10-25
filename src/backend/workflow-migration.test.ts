@@ -208,4 +208,32 @@ describe("workflow migration", () => {
     expect(count(db, "projection_messaging_connections")).toBe(1);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
+
+  it("keeps run and step keys unique in one workflow only, and refuses a step of an annotation", () => {
+    const db = databaseAt(45);
+    seed(db, 45);
+    migrateOpenBotDatabase(db);
+    seedWorkflow(db);
+    // A copy keeps the node ids, so its keys are the same text as the first workflow's.
+    db.exec(`INSERT INTO workflows (workflow_id, title, created_at, updated_at)
+      VALUES ('workflow-2', 'Competitor watch copy', '2026-01-04', '2026-01-04')`);
+    const run = (workflowId: string, runId: string, number: number) =>
+      `INSERT INTO workflow_runs (run_id, workflow_id, number, source, idempotency_key, graph_revision, graph_json,
+          status, started_at, updated_at)
+        VALUES ('${runId}', '${workflowId}', ${number}, 'webhook', 'webhook:trigger:delivery-1', 0,
+          '{"nodes":[],"edges":[],"strokes":[]}', 'running', '2026-01-04', '2026-01-04')`;
+    const step = (workflowId: string, stepId: string, kind: string) =>
+      `INSERT INTO workflow_steps (step_id, workflow_id, node_id, attempt, request_id, kind, status, created_at, updated_at)
+        VALUES ('${stepId}', '${workflowId}', 'agent', 1, 'request-2', '${kind}', 'done', '2026-01-04', '2026-01-04')`;
+    db.exec(run("workflow-2", "run-2", 1));
+    db.exec(step("workflow-2", "step-3", "agent"));
+    const fails = (sql: string) => expect(() => db.exec(sql)).toThrow("constraint failed");
+    fails(run("workflow-1", "run-3", 2));
+    fails(step("workflow-1", "step-4", "agent"));
+    fails(step("workflow-2", "step-5", "note").replace("request-2", "request-5"));
+    fails(step("workflow-2", "step-6", "agent").replace("request-2", "request-6").replace("'done'", "'waiting'"));
+    expect(count(db, "workflow_runs")).toBe(2);
+    expect(count(db, "workflow_steps")).toBe(3);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
 });

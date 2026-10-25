@@ -162,7 +162,7 @@ export class WorkflowStore {
       this.#database.connection
         .prepare(
           `SELECT MIN(next_due_at) AS due FROM workflow_triggers
-           WHERE enabled = 1 AND kind = 'schedule' AND next_due_at IS NOT NULL`,
+           WHERE kind = 'schedule' AND next_due_at IS NOT NULL`,
         )
         .get(),
     );
@@ -175,7 +175,7 @@ export class WorkflowStore {
       this.#database.connection
         .prepare(
           `SELECT workflow_id, node_id, schedule_json, timezone, next_due_at FROM workflow_triggers
-           WHERE enabled = 1 AND kind = 'schedule' AND next_due_at IS NOT NULL AND next_due_at <= ?
+           WHERE kind = 'schedule' AND next_due_at IS NOT NULL AND next_due_at <= ?
            ORDER BY next_due_at, workflow_id, node_id`,
         )
         .all(now.toISOString()),
@@ -199,13 +199,13 @@ export class WorkflowStore {
    * Moves a schedule trigger to its next occurrence. It changes nothing when a save planned the
    * trigger again after `dueAt` was read, so the new plan stays.
    */
-  advanceTrigger(due: DueWorkflowTrigger, nextDueAt: string | null, scheduledFor: string, now = new Date()): boolean {
+  advanceTrigger(due: DueWorkflowTrigger, nextDueAt: string | null, now = new Date()): boolean {
     const result = this.#database.connection
       .prepare(
-        `UPDATE workflow_triggers SET next_due_at = ?, last_scheduled_for = ?, updated_at = ?
+        `UPDATE workflow_triggers SET next_due_at = ?, updated_at = ?
          WHERE workflow_id = ? AND node_id = ? AND next_due_at = ?`,
       )
-      .run(nextDueAt, scheduledFor, now.toISOString(), due.workflowId, due.nodeId, due.dueAt);
+      .run(nextDueAt, now.toISOString(), due.workflowId, due.nodeId, due.dueAt);
     return Number(result.changes) > 0;
   }
 

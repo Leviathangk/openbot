@@ -74,20 +74,17 @@ export class WorkflowTriggers implements RoutineDueSource {
   /** The occurrence that starts a run, or null when the trigger changed since it was read. */
   #advance(trigger: DueWorkflowTrigger, now: Date): string | null {
     const timezone = trigger.timezone ?? this.#timezone();
-    if (trigger.schedule.kind === "once")
-      return this.#store.advanceTrigger(trigger, null, trigger.dueAt, now) ? trigger.dueAt : null;
+    if (trigger.schedule.kind === "once") return this.#store.advanceTrigger(trigger, null, now) ? trigger.dueAt : null;
     let occurrence: { scheduledFor: Date; nextRunAt: Date };
     try {
       occurrence = collapseMissedOccurrences(trigger.schedule, timezone, new Date(trigger.dueAt), now);
     } catch (error) {
       // A schedule that has no next occurrence, such as one in a zone that no longer exists, stops.
       if (!(error instanceof RoutineInputError)) throw error;
-      return this.#store.advanceTrigger(trigger, null, trigger.dueAt, now) ? trigger.dueAt : null;
+      return this.#store.advanceTrigger(trigger, null, now) ? trigger.dueAt : null;
     }
     const scheduledFor = occurrence.scheduledFor.toISOString();
-    return this.#store.advanceTrigger(trigger, occurrence.nextRunAt.toISOString(), scheduledFor, now)
-      ? scheduledFor
-      : null;
+    return this.#store.advanceTrigger(trigger, occurrence.nextRunAt.toISOString(), now) ? scheduledFor : null;
   }
 }
 

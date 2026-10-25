@@ -48,7 +48,7 @@ export interface StoredWorkflowStep extends WorkflowStep {
   createdAt: string;
 }
 
-export const OPEN_STEP_STATUSES = ["waiting", "running", "approval"] as const satisfies readonly WorkflowStepStatus[];
+export const OPEN_STEP_STATUSES = ["running", "approval"] as const satisfies readonly WorkflowStepStatus[];
 /** Whether a step has not ended yet. */
 export function isOpenStep(step: Pick<WorkflowStep, "status">): boolean {
   return isOneOf(OPEN_STEP_STATUSES, step.status);
@@ -63,7 +63,7 @@ export interface WorkflowWebhookReceipt {
   nodeId: string;
   deliveryId: string;
   status: "started" | "ignored";
-  reason: "inactive" | "busy" | null;
+  reason: "busy" | "refused" | null;
   runId: string | null;
   receivedAt: string;
 }
@@ -111,7 +111,7 @@ export interface NewWorkflowStep {
 }
 
 export interface WorkflowStepEnd {
-  status: Exclude<WorkflowStepStatus, "waiting" | "running" | "approval">;
+  status: Exclude<WorkflowStepStatus, "running" | "approval">;
   output?: string | null;
   branch?: WorkflowBranch | null;
   error?: string | null;
@@ -131,7 +131,9 @@ export class WorkflowRunStore {
     return this.#transaction(() => {
       const db = this.#database.connection;
       const existing = databaseRow(
-        db.prepare("SELECT run_id FROM workflow_runs WHERE idempotency_key = ?").get(input.idempotencyKey),
+        db
+          .prepare("SELECT run_id FROM workflow_runs WHERE workflow_id = ? AND idempotency_key = ?")
+          .get(input.workflowId, input.idempotencyKey),
       );
       if (existing) {
         const run = this.run(requiredStringColumn(existing, "run_id"));
@@ -294,7 +296,9 @@ export class WorkflowRunStore {
     return this.#transaction(() => {
       const db = this.#database.connection;
       const existing = databaseRow(
-        db.prepare("SELECT step_id FROM workflow_steps WHERE request_id = ?").get(input.requestId),
+        db
+          .prepare("SELECT step_id FROM workflow_steps WHERE workflow_id = ? AND request_id = ?")
+          .get(input.workflowId, input.requestId),
       );
       if (existing) {
         const step = this.step(requiredStringColumn(existing, "step_id"));
@@ -334,7 +338,7 @@ export class WorkflowRunStore {
         input.output ?? null,
         input.branch ?? null,
         input.error ?? null,
-        input.status === "waiting" ? null : at,
+        at,
         ended,
         at,
         at,

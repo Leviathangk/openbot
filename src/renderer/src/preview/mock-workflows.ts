@@ -51,7 +51,7 @@ interface MockWorkflowRecord {
 
 const MAX_VERSIONS = 50;
 const STEP_MS = 900;
-const OPEN_STEPS: readonly WorkflowStep["status"][] = ["waiting", "running", "approval"];
+const OPEN_STEPS: readonly WorkflowStep["status"][] = ["running", "approval"];
 
 /** The fixed answer of a step in the preview. */
 function mockAnswer(node: WorkflowNode, input: string): string {

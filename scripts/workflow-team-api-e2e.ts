@@ -461,7 +461,7 @@ async function settled(runId: string, nodeId: string) {
   for (;;) {
     await Effect.runPromise(workflows.sweep());
     const found = (await runCauseEffect(workflows.run(runId))).steps.find((candidate) => candidate.nodeId === nodeId);
-    if (found && found.status !== "running" && found.status !== "waiting") return found;
+    if (found && found.status !== "running") return found;
     await new Promise((done) => setImmediate(done));
   }
 }
