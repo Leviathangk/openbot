@@ -33,6 +33,8 @@ export const messages = {
   "error.workflow.outputRefused": "Der Ort hat den Beitrag abgelehnt. Stelle sicher, dass OpenBot dort posten kann.",
   "error.workflow.outputUncertain":
     "Der Beitrag wurde unterwegs unterbrochen. Ein Teil kann schon am Ort sein. Sieh dort nach, bevor du es erneut versuchst.",
+  "error.workflow.tooLarge":
+    "Dieser Workflow ist zu groß zum Speichern. Entferne einige Zeichnungen oder lange Texte und versuche es erneut.",
   "error.workflow.tooLargeToSend":
     "Dieser Workflow ist zu groß, um ihn an einen anderen Computer zu senden. Öffne ihn auf dem Computer, auf dem der Server läuft.",
   "error.workflow.webhookMissing":

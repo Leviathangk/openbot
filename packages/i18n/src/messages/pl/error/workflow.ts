@@ -32,6 +32,8 @@ export const messages = {
   "error.workflow.outputRefused": "Miejsce odrzuciło wpis. Upewnij się, że OpenBot może tam publikować.",
   "error.workflow.outputUncertain":
     "Wpis zatrzymał się w drodze. Jego część może już być w tym miejscu. Sprawdź to, zanim spróbujesz ponownie.",
+  "error.workflow.tooLarge":
+    "Ten workflow jest za duży, aby go zapisać. Usuń część rysunków lub długich tekstów i spróbuj ponownie.",
   "error.workflow.tooLargeToSend":
     "Ten workflow jest za duży, aby wysłać go na inny komputer. Otwórz go na komputerze, na którym działa serwer.",
   "error.workflow.webhookMissing": "Ten krok nie jest wyzwalaczem webhook. Zapisz przepływ pracy i spróbuj ponownie.",

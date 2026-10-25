@@ -33,6 +33,8 @@ export const messages = {
   "error.workflow.outputRefused": "O local recusou a publicação. Verifique se o OpenBot pode publicar lá.",
   "error.workflow.outputUncertain":
     "A publicação parou no caminho. Uma parte pode já estar no local. Verifique antes de tentar de novo.",
+  "error.workflow.tooLarge":
+    "Este fluxo de trabalho é grande demais para ser salvo. Remova alguns desenhos ou textos longos e tente novamente.",
   "error.workflow.tooLargeToSend":
     "Este fluxo de trabalho é grande demais para ser enviado a outro computador. Abra-o no computador que executa o servidor.",
   "error.workflow.webhookMissing":

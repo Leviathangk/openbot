@@ -31,6 +31,7 @@ export const messages = defineMessages("error.workflow", {
   "error.workflow.outputRefused": "The place refused the post. Make sure that OpenBot can post there.",
   "error.workflow.outputUncertain":
     "The post stopped on its way. Part of it can be in the place. Look there before you try again.",
+  "error.workflow.tooLarge": "This workflow is too large to save. Remove some drawings or long texts, then try again.",
   "error.workflow.tooLargeToSend":
     "This workflow is too large to send to another computer. Open it on the computer that runs the server.",
   "error.workflow.webhookMissing": "This step is not a webhook trigger. Save the workflow, then try again.",

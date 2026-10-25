@@ -88,7 +88,6 @@ import { type TeamProtocolSupportV1, teamProtocolUpdateDirection } from "@openbo
 import type { TeamProtocolV2Json } from "@openbot/contracts/team-protocol/v2";
 import { TEAM_PROTOCOL_V3 } from "@openbot/contracts/team-protocol/v3";
 import { decodeTeamProtocolSupportV7Base } from "@openbot/contracts/team-protocol/v7-base";
-import { WORKFLOWS_CAPABILITY } from "@openbot/contracts/team-protocol/workflows-v1";
 import {
   WORKSPACE_DIRECTORY_CAPABILITY,
   WORKSPACE_DIRECTORY_ROUTES,
@@ -124,10 +123,8 @@ import {
   type TeamApiRequest,
   type TeamChannelsApi,
   type TeamRoutineFlowsApi,
-  type TeamWorkflowsApi,
   teamChannelsApi,
   teamRoutineFlowsApi,
-  teamWorkflowsApi,
   testAgentRoutine,
   updateAgentRoutine,
   updateQueuedMessage,
@@ -242,8 +239,6 @@ export interface WebWorkspaceRuntime {
   workspaceDirectory(agentId: string, path: string): Promise<WorkspaceDirectory>;
   /** The routine canvas routes. Each call refuses while the host does not serve `routine-flows-v1`. */
   routineFlows?: TeamRoutineFlowsApi;
-  /** The workflow routes. Each call refuses while the host does not serve `workflows-v1`. */
-  workflows?: TeamWorkflowsApi;
   /** Changes an agent routine, such as its instruction. */
   updateRoutine?: (input: UpdateRoutineInput) => Promise<Routine>;
   /** Runs an agent routine now. */
@@ -600,17 +595,6 @@ export function createWebWorkspaceRuntime(
     return teamApi(method, path, decode, body);
   }
   const routineFlows = teamRoutineFlowsApi(routineFlowsRequest);
-  /** The workflow routes, sent only to a host that negotiated them. */
-  async function workflowsRequest<T>(
-    method: string,
-    path: string,
-    decode: (value: unknown) => T,
-    body?: TeamProtocolV2Json,
-  ): Promise<T> {
-    if (!capabilities.includes(WORKFLOWS_CAPABILITY)) throw new Error(currentText().t("error.workflow.serverTooOld"));
-    return teamApi(method, path, decode, body);
-  }
-  const workflows = teamWorkflowsApi(workflowsRequest);
   const browserView = createRemoteBrowserView(
     (data) => peer.sendHostStreamData(data),
     request,
@@ -1043,7 +1027,6 @@ export function createWebWorkspaceRuntime(
       return decodeWorkspaceDirectory(await request("POST", WORKSPACE_DIRECTORY_ROUTES.list, { agentId, path }));
     },
     routineFlows,
-    workflows,
     updateRoutine: (input) =>
       runTeamEffect(updateAgentRoutine(teamApi, input).pipe(Effect.mapError((error) => error.cause))),
     testRoutine: (input) =>

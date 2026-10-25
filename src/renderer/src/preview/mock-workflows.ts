@@ -311,6 +311,11 @@ export function mockWorkflows(
     },
     versions: async (workflowId) =>
       structuredClone(record(workflowId).versions.map(({ graph: _graph, ...version }) => version)),
+    versionGraph: async (input) => {
+      const version = record(input.workflowId).versions.find((entry) => entry.id === input.versionId);
+      if (!version) throw new Error(sourceText("error.workflow.versionMissing"));
+      return structuredClone(version.graph);
+    },
     restoreVersion: async (input) => {
       const { detail, versions } = record(input.workflowId);
       const version = versions.find((entry) => entry.id === input.versionId);

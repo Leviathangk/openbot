@@ -1,4 +1,5 @@
-// The payloads of the workflow endpoints. Only a malformed payload fails here, so the text stays English.
+// The payloads of the workflow endpoints. Only a malformed payload fails here, so the text stays
+// English; a graph that is too large is the one exception that a person can cause.
 
 import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import {
@@ -7,23 +8,82 @@ import {
   isCreateWorkflowInput,
   isDecideWorkflowStepInput,
   isRenameWorkflowInput,
-  isRestoreWorkflowVersionInput,
   isRetryWorkflowStepInput,
   isRunWorkflowStepInput,
   isSaveWorkflowGraphInput,
   isStartWorkflowRunInput,
   isWorkflowRunsInput,
   isWorkflowTriggerInput,
+  isWorkflowVersionInput,
   type RenameWorkflowInput,
-  type RestoreWorkflowVersionInput,
   type RetryWorkflowStepInput,
   type RunWorkflowStepInput,
   type SaveWorkflowGraphInput,
   type StartWorkflowRunInput,
+  type WorkflowEdge,
+  type WorkflowGraph,
+  type WorkflowNode,
+  type WorkflowNodeSize,
+  type WorkflowPoint,
   type WorkflowRunsInput,
   type WorkflowTriggerInput,
+  type WorkflowVersionInput,
 } from "@openbot/contracts/ipc";
+import { sourceText } from "@openbot/i18n/source";
 import { requireString } from "./validation";
+
+const point = ({ x, y }: WorkflowPoint): WorkflowPoint => ({ x, y });
+
+function knownSize({ width, height, font }: WorkflowNodeSize): WorkflowNodeSize {
+  return {
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    ...(font === undefined ? {} : { font }),
+  };
+}
+
+function knownNode(node: WorkflowNode): WorkflowNode {
+  return {
+    id: node.id,
+    kind: node.kind,
+    at: point(node.at),
+    ...(node.size === undefined ? {} : { size: knownSize(node.size) }),
+    ...(node.locked === undefined ? {} : { locked: node.locked }),
+    fields: { ...node.fields },
+    ...(node.schedule === undefined ? {} : { schedule: node.schedule }),
+  };
+}
+
+function knownEdge(edge: WorkflowEdge): WorkflowEdge {
+  return {
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    type: edge.type,
+    ...(edge.branch === undefined ? {} : { branch: edge.branch }),
+  };
+}
+
+/**
+ * The graph with only the keys that the contract names, so the strokes and the run versions that the
+ * host keeps as JSON hold no other data. A graph larger than one frame can carry is refused.
+ */
+function knownGraph(graph: WorkflowGraph): WorkflowGraph {
+  const known: WorkflowGraph = {
+    nodes: graph.nodes.map(knownNode),
+    edges: graph.edges.map(knownEdge),
+    strokes: graph.strokes.map((stroke) => ({
+      id: stroke.id,
+      brush: stroke.brush,
+      color: stroke.color,
+      width: stroke.width,
+      points: stroke.points.map(point),
+    })),
+  };
+  if (Buffer.byteLength(JSON.stringify(known)) > INPUT_LIMITS.workflowGraphBytes)
+    throw new Error(sourceText("error.workflow.tooLarge"));
+  return known;
+}
 
 export function parseWorkflowId(value: unknown): string {
   return requireString(value, "workflowId", INPUT_LIMITS.identifier);
@@ -39,7 +99,7 @@ export function parseWorkflowRunId(value: unknown): string {
 
 export function parseCreateWorkflow(value: unknown): CreateWorkflowInput {
   if (!isCreateWorkflowInput(value)) throw new Error("Invalid workflow.");
-  return { title: value.title, ...(value.graph === undefined ? {} : { graph: value.graph }) };
+  return { title: value.title, ...(value.graph === undefined ? {} : { graph: knownGraph(value.graph) }) };
 }
 
 export function parseRenameWorkflow(value: unknown): RenameWorkflowInput {
@@ -49,11 +109,11 @@ export function parseRenameWorkflow(value: unknown): RenameWorkflowInput {
 
 export function parseSaveWorkflowGraph(value: unknown): SaveWorkflowGraphInput {
   if (!isSaveWorkflowGraphInput(value)) throw new Error("Invalid workflow graph.");
-  return { workflowId: value.workflowId, baseRevision: value.baseRevision, graph: value.graph };
+  return { workflowId: value.workflowId, baseRevision: value.baseRevision, graph: knownGraph(value.graph) };
 }
 
-export function parseRestoreWorkflowVersion(value: unknown): RestoreWorkflowVersionInput {
-  if (!isRestoreWorkflowVersionInput(value)) throw new Error("Invalid workflow version.");
+export function parseWorkflowVersion(value: unknown): WorkflowVersionInput {
+  if (!isWorkflowVersionInput(value)) throw new Error("Invalid workflow version.");
   return { workflowId: value.workflowId, versionId: value.versionId };
 }
 

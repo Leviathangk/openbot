@@ -2,6 +2,7 @@
 
 import {
   isWorkflowDetail,
+  isWorkflowGraph,
   isWorkflowRunDetail,
   isWorkflowRunPage,
   isWorkflowSaveResult,
@@ -15,6 +16,7 @@ import { guardedDecoder, guardedListDecoder } from "@openbot/contracts/ipc-decod
 export const decodeWorkflowSummaries = guardedListDecoder(isWorkflowSummary, "workflow list response");
 export const decodeWorkflowSummary = guardedDecoder(isWorkflowSummary, "workflow summary response");
 export const decodeWorkflowDetail = guardedDecoder(isWorkflowDetail, "workflow response");
+export const decodeWorkflowGraph = guardedDecoder(isWorkflowGraph, "workflow version response");
 export const decodeWorkflowSaveResult = guardedDecoder(isWorkflowSaveResult, "workflow save response");
 export const decodeWorkflowVersions = guardedListDecoder(isWorkflowVersion, "workflow versions response");
 export const decodeWorkflowRunDetail = guardedDecoder(isWorkflowRunDetail, "workflow run response");

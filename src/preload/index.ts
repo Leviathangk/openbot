@@ -277,6 +277,7 @@ import {
 import { decodeVaultImportResult, decodeVaultSecret, decodeVaultState } from "./vault-decoding";
 import {
   decodeWorkflowDetail,
+  decodeWorkflowGraph,
   decodeWorkflowRunDetail,
   decodeWorkflowRunPage,
   decodeWorkflowSaveResult,
@@ -697,6 +698,7 @@ const openbotApi: OpenBotDesktopApi = {
     delete: decodeVoid,
     saveGraph: decodeWorkflowSaveResult,
     versions: decodeWorkflowVersions,
+    versionGraph: decodeWorkflowGraph,
     restoreVersion: decodeWorkflowDetail,
     startRun: decodeWorkflowRunDetail,
     runStep: decodeWorkflowStep,

@@ -34,6 +34,8 @@ export const messages = {
   "error.workflow.outputRefused": "Le lieu a refusé la publication. Vérifiez qu’OpenBot peut y publier.",
   "error.workflow.outputUncertain":
     "La publication s’est arrêtée en chemin. Une partie peut déjà être dans le lieu. Vérifiez avant de réessayer.",
+  "error.workflow.tooLarge":
+    "Ce workflow est trop volumineux pour être enregistré. Supprimez des dessins ou des textes longs, puis réessayez.",
   "error.workflow.tooLargeToSend":
     "Ce workflow est trop volumineux pour être envoyé à un autre ordinateur. Ouvrez-le sur l’ordinateur qui exécute le serveur.",
   "error.workflow.webhookMissing":

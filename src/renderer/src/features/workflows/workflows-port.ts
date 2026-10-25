@@ -35,6 +35,7 @@ export function desktopWorkflowHost(serverId: string, local: boolean): WorkflowH
       delete: (workflowId) => api().delete(workflowId, serverId),
       saveGraph: (input) => api().saveGraph(input, serverId),
       versions: (workflowId) => api().versions(workflowId, serverId),
+      versionGraph: (input) => api().versionGraph(input, serverId),
       restoreVersion: (input) => api().restoreVersion(input, serverId),
       startRun: (input) => api().startRun(input, serverId),
       runStep: (input) => api().runStep(input, serverId),

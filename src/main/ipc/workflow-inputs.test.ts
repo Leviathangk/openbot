@@ -11,6 +11,7 @@ import {
   parseStartWorkflowRun,
   parseWorkflowRuns,
   parseWorkflowTrigger,
+  parseWorkflowVersion,
 } from "./workflow-inputs";
 
 const node = (id: string, fields: object = {}) => ({ id, kind: "prompt", at: { x: 0, y: 0 }, fields });
@@ -20,6 +21,47 @@ describe("workflow payloads from the renderer", () => {
   it("keeps only the known fields of a valid save", () => {
     const graph = { nodes: [node("a", { text: "hi" })], edges: [], strokes: [] };
     expect(parseSaveWorkflowGraph({ ...save(graph), extra: "dropped" })).toEqual(save(graph));
+  });
+
+  it("keeps only the known keys inside nodes, edges, strokes and points", () => {
+    const point = { x: 1, y: 2, pressure: 0.5 };
+    const graph = {
+      nodes: [
+        { ...node("a"), at: point, size: { width: 10, depth: 3 }, owner: "x" },
+        { ...node("b"), locked: true },
+      ],
+      edges: [{ id: "e", from: "a", to: "b", type: "text", weight: 2 }],
+      strokes: [{ id: "s", brush: "pen", color: "ink", width: 2, points: [point], blur: 1 }],
+      comments: [],
+    };
+    expect(parseSaveWorkflowGraph(save(graph)).graph).toEqual({
+      nodes: [
+        { ...node("a"), at: { x: 1, y: 2 }, size: { width: 10 } },
+        { ...node("b"), locked: true },
+      ],
+      edges: [{ id: "e", from: "a", to: "b", type: "text" }],
+      strokes: [{ id: "s", brush: "pen", color: "ink", width: 2, points: [{ x: 1, y: 2 }] }],
+    });
+  });
+
+  it("refuses a graph whose JSON is over the byte limit, also on create", () => {
+    const text = "x".repeat(INPUT_LIMITS.workflowNodeText);
+    const count = Math.ceil(INPUT_LIMITS.workflowGraphBytes / text.length) + 1;
+    const graph = {
+      nodes: Array.from({ length: count }, (_, index) => node(`n${index}`, { text })),
+      edges: [],
+      strokes: [],
+    };
+    expect(() => parseSaveWorkflowGraph(save(graph))).toThrow("This workflow is too large to save.");
+    expect(() => parseCreateWorkflow({ title: "Big", graph })).toThrow("This workflow is too large to save.");
+  });
+
+  it("keeps only the workflow and the version of a version request", () => {
+    expect(parseWorkflowVersion({ workflowId: "w", versionId: "v", graph: {} })).toEqual({
+      workflowId: "w",
+      versionId: "v",
+    });
+    expect(() => parseWorkflowVersion({ workflowId: "w" })).toThrow("Invalid workflow version.");
   });
 
   it.each([
@@ -105,6 +147,8 @@ describe("workflow payloads from the renderer", () => {
       () => parseWorkflowRuns({ workflowId: "w", limit: INPUT_LIMITS.workflowRunsPage + 1 }),
     ],
     ["a runs page of zero", () => parseWorkflowRuns({ workflowId: "w", limit: 0 })],
+    ["a runs cursor over the limit", () => parseWorkflowRuns({ workflowId: "w", limit: 1, before: "x".repeat(65) })],
+    ["an empty runs cursor", () => parseWorkflowRuns({ workflowId: "w", limit: 1, before: "" })],
     ["a webhook secret request without a node", () => parseWorkflowTrigger({ workflowId: "w" })],
   ])("refuses %s", (_name, parse) => {
     expect(parse).toThrow();

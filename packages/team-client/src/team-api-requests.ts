@@ -41,14 +41,6 @@ import {
   isRoutineFlowCanvas,
   isRoutineFlowLink,
   isRoutineRun,
-  isWorkflowDetail,
-  isWorkflowRunDetail,
-  isWorkflowRunPage,
-  isWorkflowSaveResult,
-  isWorkflowStep,
-  isWorkflowSummary,
-  isWorkflowVersion,
-  isWorkflowWebhookSecret,
   type OpenBotDesktopApi,
   type QueuedMessageReceipt,
   type RemoteAgentImportResult,
@@ -65,8 +57,6 @@ import {
   type TestRoutineInput,
   type UpdateQueuedMessageInput,
   type UpdateRoutineInput,
-  type WorkflowSummary,
-  type WorkflowVersion,
 } from "@openbot/contracts/ipc";
 import { guardedDecoder } from "@openbot/contracts/ipc-decoding";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
@@ -83,7 +73,6 @@ import { CHANNEL_ROUTES } from "@openbot/contracts/team-protocol/channels-v1";
 import { CONTEXT_RESET_ROUTES } from "@openbot/contracts/team-protocol/context-reset-v1";
 import { ROUTINE_FLOWS_ROUTES } from "@openbot/contracts/team-protocol/routine-flows-v1";
 import { decodeTeamProtocolV2Json, type TeamProtocolV2Json } from "@openbot/contracts/team-protocol/v2";
-import { WORKFLOWS_ROUTES } from "@openbot/contracts/team-protocol/workflows-v1";
 import type { RemoteFileUpload } from "./file-upload";
 
 export class TeamRequestError extends Schema.TaggedError<TeamRequestError>()("TeamRequestError", {
@@ -394,52 +383,6 @@ export function teamRoutineFlowsApi(request: TeamApiRequest): TeamRoutineFlowsAp
     connect: (input) => post(ROUTINE_FLOWS_ROUTES.connect, decodeRoutineFlowLink, input),
     disconnect: (input) => post(ROUTINE_FLOWS_ROUTES.disconnect, ignoreResponse, input),
     updateLink: (input) => post(ROUTINE_FLOWS_ROUTES.updateLink, decodeRoutineFlowLink, input),
-  };
-}
-/** The workflow calls of the desktop IPC surface. Send them only to a host that serves `workflows-v1`. */
-export type TeamWorkflowsApi = OpenBotDesktopApi["workflows"];
-
-const decodeWorkflowList = guardedDecoder(
-  (value: unknown): value is { workflows: WorkflowSummary[] } =>
-    isDynamicRecord(value) && Array.isArray(value.workflows) && value.workflows.every(isWorkflowSummary),
-  "workflow list",
-);
-const decodeWorkflowVersions = guardedDecoder(
-  (value: unknown): value is { versions: WorkflowVersion[] } =>
-    isDynamicRecord(value) && Array.isArray(value.versions) && value.versions.every(isWorkflowVersion),
-  "workflow versions",
-);
-const decodeWorkflowSummary = guardedDecoder(isWorkflowSummary, "workflow");
-const decodeWorkflowDetail = guardedDecoder(isWorkflowDetail, "workflow");
-const decodeWorkflowSaveResult = guardedDecoder(isWorkflowSaveResult, "workflow save result");
-const decodeWorkflowRunDetail = guardedDecoder(isWorkflowRunDetail, "workflow run");
-const decodeWorkflowRunPage = guardedDecoder(isWorkflowRunPage, "workflow runs");
-const decodeWorkflowStep = guardedDecoder(isWorkflowStep, "workflow step");
-const decodeWorkflowWebhookSecret = guardedDecoder(isWorkflowWebhookSecret, "workflow webhook secret");
-
-/** Every workflow route is a POST with its input in the body; a bare id goes in as its named field. */
-export function teamWorkflowsApi(request: TeamApiRequest): TeamWorkflowsApi {
-  const post = <T>(path: string, decode: (value: unknown) => T, body: unknown) =>
-    request("POST", path, decode, decodeTeamProtocolV2Json(body));
-  return {
-    list: async () => (await post(WORKFLOWS_ROUTES.list, decodeWorkflowList, {})).workflows,
-    get: (workflowId) => post(WORKFLOWS_ROUTES.get, decodeWorkflowDetail, { workflowId }),
-    create: (input) => post(WORKFLOWS_ROUTES.create, decodeWorkflowDetail, input),
-    rename: (input) => post(WORKFLOWS_ROUTES.rename, decodeWorkflowSummary, input),
-    delete: (workflowId) => post(WORKFLOWS_ROUTES.delete, ignoreResponse, { workflowId }),
-    saveGraph: (input) => post(WORKFLOWS_ROUTES.saveGraph, decodeWorkflowSaveResult, input),
-    versions: async (workflowId) =>
-      (await post(WORKFLOWS_ROUTES.versions, decodeWorkflowVersions, { workflowId })).versions,
-    restoreVersion: (input) => post(WORKFLOWS_ROUTES.restoreVersion, decodeWorkflowDetail, input),
-    startRun: (input) => post(WORKFLOWS_ROUTES.startRun, decodeWorkflowRunDetail, input),
-    runStep: (input) => post(WORKFLOWS_ROUTES.runStep, decodeWorkflowStep, input),
-    stopStep: (stepId) => post(WORKFLOWS_ROUTES.stopStep, ignoreResponse, { stepId }),
-    stopRun: (runId) => post(WORKFLOWS_ROUTES.stopRun, ignoreResponse, { runId }),
-    retryStep: (input) => post(WORKFLOWS_ROUTES.retryStep, decodeWorkflowStep, input),
-    decide: (input) => post(WORKFLOWS_ROUTES.decide, ignoreResponse, input),
-    runs: (input) => post(WORKFLOWS_ROUTES.runs, decodeWorkflowRunPage, input),
-    run: (runId) => post(WORKFLOWS_ROUTES.run, decodeWorkflowRunDetail, { runId }),
-    rotateWebhookSecret: (input) => post(WORKFLOWS_ROUTES.rotateWebhookSecret, decodeWorkflowWebhookSecret, input),
   };
 }
 /** An Effect request lets the desktop reuse its managed request lifetime. */

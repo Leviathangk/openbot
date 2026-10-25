@@ -30,7 +30,7 @@ export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number];
 export const WORKFLOW_ANNOTATION_KINDS = ["text", "note", "shape"] as const satisfies readonly WorkflowNodeKind[];
 
 export function isWorkflowStepKind(kind: WorkflowNodeKind): boolean {
-  return kind !== "text" && kind !== "note" && kind !== "shape";
+  return !isOneOf(WORKFLOW_ANNOTATION_KINDS, kind);
 }
 
 export const WORKFLOW_PORT_TYPES = ["text", "image", "file"] as const;
@@ -147,6 +147,11 @@ export interface WorkflowDetail {
   /** Goes up by one on each save. A save from an older revision is a conflict. */
   revision: number;
   triggers: WorkflowTriggerState[];
+  /**
+   * Set by the client when the host sent a node kind or a port type that this app does not know.
+   * The app shows such a node as a locked note and must not save the graph, as the save would drop it.
+   */
+  needsNewerApp?: true;
 }
 
 export interface WorkflowVersion {
@@ -217,7 +222,7 @@ export interface SaveWorkflowGraphInput {
 
 export type WorkflowSaveResult = { ok: true; revision: number } | { ok: false; conflict: WorkflowDetail };
 
-export interface RestoreWorkflowVersionInput {
+export interface WorkflowVersionInput {
   workflowId: string;
   versionId: string;
 }
@@ -266,6 +271,8 @@ export interface WorkflowWebhookSecret {
 export const WORKFLOW_MAX_COORDINATE = 1_000_000;
 const MAX_SIZE = 100_000;
 const FIELD_NAME = 64;
+/** `<started at>|<run id>`, as `WorkflowRunPage.nextBefore` gives it. */
+const RUN_CURSOR = 64;
 
 function isCoordinate(value: unknown): value is number {
   return isFiniteNumber(value) && Math.abs(value) <= WORKFLOW_MAX_COORDINATE;
@@ -412,7 +419,8 @@ export function isWorkflowDetail(value: unknown): value is WorkflowDetail {
     isWorkflowGraph(value.graph) &&
     isRevision(value.revision) &&
     Array.isArray(value.triggers) &&
-    value.triggers.every(isTriggerState)
+    value.triggers.every(isTriggerState) &&
+    (value.needsNewerApp === undefined || value.needsNewerApp === true)
   );
 }
 
@@ -501,7 +509,7 @@ export function isSaveWorkflowGraphInput(value: unknown): value is SaveWorkflowG
   );
 }
 
-export function isRestoreWorkflowVersionInput(value: unknown): value is RestoreWorkflowVersionInput {
+export function isWorkflowVersionInput(value: unknown): value is WorkflowVersionInput {
   return isDynamicRecord(value) && isIdentifier(value.workflowId) && isIdentifier(value.versionId);
 }
 
@@ -535,7 +543,7 @@ export function isWorkflowRunsInput(value: unknown): value is WorkflowRunsInput 
   return (
     isDynamicRecord(value) &&
     isIdentifier(value.workflowId) &&
-    (value.before === undefined || isIdentifier(value.before)) &&
+    (value.before === undefined || (isBoundedString(value.before, RUN_CURSOR) && value.before.length > 0)) &&
     integerInRange(value.limit, 1, INPUT_LIMITS.workflowRunsPage)
   );
 }

@@ -34,6 +34,8 @@ export const messages = {
   "error.workflow.outputRefused": "投稿先が投稿を拒否しました。OpenBot がそこに投稿できることを確認してください。",
   "error.workflow.outputUncertain":
     "投稿が途中で止まりました。一部がすでに投稿先にある可能性があります。もう一度試す前に確認してください。",
+  "error.workflow.tooLarge":
+    "このワークフローは大きすぎるため保存できません。描画や長いテキストを一部削除してから、もう一度お試しください。",
   "error.workflow.tooLargeToSend":
     "このワークフローは大きすぎるため、別のコンピューターに送信できません。サーバーを実行しているコンピューターで開いてください。",
   "error.workflow.webhookMissing":

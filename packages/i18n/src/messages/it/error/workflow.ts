@@ -32,6 +32,8 @@ export const messages = {
   "error.workflow.outputRefused": "Il luogo ha rifiutato il post. Verifica che OpenBot possa pubblicare lì.",
   "error.workflow.outputUncertain":
     "Il post si è fermato a metà. Una parte può essere già nel luogo. Controlla prima di riprovare.",
+  "error.workflow.tooLarge":
+    "Questo workflow è troppo grande per essere salvato. Rimuovi alcuni disegni o testi lunghi, poi riprova.",
   "error.workflow.tooLargeToSend":
     "Questo workflow è troppo grande per essere inviato a un altro computer. Aprilo sul computer che esegue il server.",
   "error.workflow.webhookMissing": "Questo passaggio non è un trigger webhook. Salva il workflow, poi riprova.",

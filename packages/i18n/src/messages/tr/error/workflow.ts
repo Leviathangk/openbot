@@ -32,6 +32,8 @@ export const messages = {
   "error.workflow.outputRefused": "Yer gönderiyi reddetti. OpenBot'un orada gönderi yapabildiğinden emin olun.",
   "error.workflow.outputUncertain":
     "Gönderi yolda durdu. Bir kısmı yerde olabilir. Yeniden denemeden önce kontrol edin.",
+  "error.workflow.tooLarge":
+    "Bu iş akışı kaydedilemeyecek kadar büyük. Bazı çizimleri veya uzun metinleri kaldırıp yeniden deneyin.",
   "error.workflow.tooLargeToSend":
     "Bu iş akışı başka bir bilgisayara gönderilemeyecek kadar büyük. Sunucuyu çalıştıran bilgisayarda açın.",
   "error.workflow.webhookMissing":

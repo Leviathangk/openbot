@@ -34,6 +34,8 @@ export const messages = {
   "error.workflow.outputRefused": "El lugar rechazó la publicación. Asegúrate de que OpenBot pueda publicar allí.",
   "error.workflow.outputUncertain":
     "La publicación se detuvo a medio camino. Una parte puede estar ya en el lugar. Revísalo antes de intentarlo de nuevo.",
+  "error.workflow.tooLarge":
+    "Este flujo de trabajo es demasiado grande para guardarlo. Quita algunos dibujos o textos largos e inténtalo de nuevo.",
   "error.workflow.tooLargeToSend":
     "Este flujo de trabajo es demasiado grande para enviarlo a otro ordenador. Ábrelo en el ordenador que ejecuta el servidor.",
   "error.workflow.webhookMissing":

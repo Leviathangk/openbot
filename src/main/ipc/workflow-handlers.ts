@@ -7,6 +7,9 @@ import type { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
 import type { WorkflowsHandle } from "../../backend/workflows/workflows";
 import type { HostEventsService } from "../host-events-service";
+import { acceptEmpty, type ResponseDecoder } from "../remote-host-decoding";
+import type { RemoteRequestInit } from "../remote-server-client";
+import type { RemoteWorkflowError } from "../remote-service-effects";
 import {
   decodeRemoteWorkflowDetail,
   decodeRemoteWorkflowList,
@@ -16,18 +19,15 @@ import {
   decodeRemoteWorkflowSecret,
   decodeRemoteWorkflowStep,
   decodeRemoteWorkflowSummary,
+  decodeRemoteWorkflowVersionGraph,
   decodeRemoteWorkflowVersions,
-} from "../remote-agent-decoding";
-import { acceptEmpty, type ResponseDecoder } from "../remote-host-decoding";
-import type { RemoteRequestInit } from "../remote-server-client";
-import type { RemoteWorkflowError } from "../remote-service-effects";
+} from "../remote-workflow-decoding";
 import type { IpcGroupHandlers } from "./define-ipc-group";
 import { scopedHandler, scopedQueryHandler } from "./scoped-handler";
 import {
   parseCreateWorkflow,
   parseDecideWorkflowStep,
   parseRenameWorkflow,
-  parseRestoreWorkflowVersion,
   parseRetryWorkflowStep,
   parseRunWorkflowStep,
   parseSaveWorkflowGraph,
@@ -37,6 +37,7 @@ import {
   parseWorkflowRuns,
   parseWorkflowStepId,
   parseWorkflowTrigger,
+  parseWorkflowVersion,
 } from "./workflow-inputs";
 
 interface WorkflowRemoteServers {
@@ -98,7 +99,12 @@ export function workflowIpcHandlers({
         remote: (workflowId, serverId) =>
           remote(serverId, WORKFLOWS_ROUTES.versions, decodeRemoteWorkflowVersions, { workflowId }),
       }),
-      restoreVersion: scopedHandler(parseRestoreWorkflowVersion, {
+      versionGraph: scopedHandler(parseWorkflowVersion, {
+        local: (input) => runCauseEffect(workflows.versionGraph(input)),
+        remote: (input, serverId) =>
+          remote(serverId, WORKFLOWS_ROUTES.versionGraph, decodeRemoteWorkflowVersionGraph, input),
+      }),
+      restoreVersion: scopedHandler(parseWorkflowVersion, {
         local: (input) => runCauseEffect(workflows.restoreVersion(input)),
         remote: (input, serverId) =>
           remote(serverId, WORKFLOWS_ROUTES.restoreVersion, decodeRemoteWorkflowDetail, input),

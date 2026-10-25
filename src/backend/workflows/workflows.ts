@@ -31,7 +31,6 @@ import {
   isReasoningEffort,
   type QueueDeliveryStatus,
   type RenameWorkflowInput,
-  type RestoreWorkflowVersionInput,
   type RetryWorkflowStepInput,
   type RunWorkflowStepInput,
   type SaveWorkflowGraphInput,
@@ -48,6 +47,7 @@ import {
   type WorkflowStep,
   type WorkflowSummary,
   type WorkflowVersion,
+  type WorkflowVersionInput,
 } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 import { createOpenBotLogger } from "@openbot/logging";
@@ -185,9 +185,10 @@ export interface WorkflowsShape {
   remove(workflowId: string): Effect.Effect<void, WorkflowFailed>;
   saveGraph(input: SaveWorkflowGraphInput): Effect.Effect<WorkflowSaveResult, WorkflowFailed>;
   versions(workflowId: string): Effect.Effect<WorkflowVersion[], WorkflowFailed>;
-  restoreVersion(input: RestoreWorkflowVersionInput): Effect.Effect<WorkflowDetail, WorkflowFailed>;
+  restoreVersion(input: WorkflowVersionInput): Effect.Effect<WorkflowDetail, WorkflowFailed>;
   /** The graph that a restore of the version would put back, or null when there is no such version. */
-  versionGraph(input: RestoreWorkflowVersionInput): Effect.Effect<WorkflowGraph | null, WorkflowFailed>;
+  /** The graph that a version keeps, so a person can look at it before a restore. */
+  versionGraph(input: WorkflowVersionInput): Effect.Effect<WorkflowGraph, WorkflowFailed>;
   /** Starts a run of the whole workflow, from a trigger, or from one node. Idempotent by request id. */
   startRun(input: StartWorkflowRunInput): Effect.Effect<WorkflowRunDetail, WorkflowFailed>;
   /** Starts the run of a schedule trigger's occurrence; see `workflow-triggers.ts`. */
@@ -717,7 +718,7 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           });
         });
 
-        const restoreVersion = Effect.fn("Workflows.restoreVersion")(function* (input: RestoreWorkflowVersionInput) {
+        const restoreVersion = Effect.fn("Workflows.restoreVersion")(function* (input: WorkflowVersionInput) {
           const detail = yield* attempt(() => store.restoreVersion(input.workflowId, input.versionId, now()));
           changed(input.workflowId);
           rearm();
@@ -996,8 +997,10 @@ class Workflows extends Context.Service<Workflows, WorkflowsShape>()("openbot/ba
           return yield* attempt(() => runDetail(found));
         });
 
-        const versionGraph = Effect.fn("Workflows.versionGraph")(function* (input: RestoreWorkflowVersionInput) {
-          return yield* attempt(() => store.versionGraph(input.workflowId, input.versionId));
+        const versionGraph = Effect.fn("Workflows.versionGraph")(function* (input: WorkflowVersionInput) {
+          const graph = yield* attempt(() => store.versionGraph(input.workflowId, input.versionId));
+          if (graph === null) return yield* refuse("missing", sourceText("error.workflow.versionMissing"));
+          return graph;
         });
 
         const workflowOf = Effect.fn("Workflows.workflowOf")(function* (ref: { runId: string } | { stepId: string }) {

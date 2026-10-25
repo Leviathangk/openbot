@@ -1,20 +1,25 @@
 // Frozen optional workflows-v1 wire contract. Keep IPC types and limits out of this file.
 //
-// What it grants, recorded here because freezing it makes it permanent: any member of a server can
-// read, change and run the workflows of the server whose agent steps name only agents that the
-// member can see, and whose model steps name only providers that the member's protocol shows. Any
-// other workflow answers as missing, and so do its runs and steps. A change or a run also needs the chat level for each agent that the workflow
-// names, before and after the change, because a run sends tasks to them. Only an owner or admin can
-// add an output that posts to a messaging place or change its place, as routine results need the
-// admin role; a member can run one that is there. A step of an agent that is
-// hidden now does not cross, as no object that names a hidden agent does. A webhook trigger's URL goes only to an owner or
-// admin; a member reads it as null, as `events-v1` keeps it behind the admin role, and only an owner
-// or admin can make a new webhook secret. Step output and error cross with at most 32,000
-// characters each, and the host empties the step texts of the oldest runs first when a page of runs
-// would not fit one WebRTC frame. A node's fields cross as an open record of texts, numbers and
-// switches, so a node kind that does not run yet keeps its settings. The optional event
+// What it grants, recorded here because freezing it makes it permanent: a member of a server reads
+// the workflows whose agent steps name only agents that the member can see, and whose model steps
+// name only providers that the member's protocol shows; an owner or admin also reads one that names
+// an agent that no longer exists, so they can fix or delete it. Any other workflow answers as
+// missing, and so do its runs, steps and versions. A run, a single step, a stop, a retry or a
+// decision needs the chat level for each agent that the workflow names, because a run sends tasks to
+// them. A change, a delete or a restore needs the manage level for each agent that the workflow
+// names, before and after the change. Only an owner or admin can add an output that posts to a
+// messaging place or change its place, as routine results need the admin role; a member can run one
+// that is there. A step of an agent that is hidden now does not cross, as no object that names a
+// hidden agent does. A webhook trigger's URL goes only to an owner or admin; a member reads it as
+// null, as `events-v1` keeps it behind the admin role, and only an owner or admin can make a new
+// webhook secret. Step output and error cross with at most 32,000 characters each, and the host
+// empties the step texts of the oldest runs first when a page of runs would not fit one WebRTC
+// frame. A node's fields cross as an open record of texts, numbers and switches, so a node kind that
+// does not run yet keeps its settings. Node kinds, port types, statuses, run sources, trigger types
+// and version kinds cross as open names, so a newer host can add one; a client shows a workflow with
+// a node kind or a port type that it does not know as read-only. The optional event
 // `workflows-changed` names only the workflow that changed, so the client reads it again. Widening
-// any of it needs a second capability string.
+// any other part needs a second capability string.
 import { isDynamicRecord, isString } from "../runtime-values";
 import {
   type AdminDecoder,
@@ -43,6 +48,7 @@ export const WORKFLOWS_ROUTES = {
   delete: "/v1/workflows/delete",
   saveGraph: "/v1/workflows/save-graph",
   versions: "/v1/workflows/versions",
+  versionGraph: "/v1/workflows/version-graph",
   restoreVersion: "/v1/workflows/restore-version",
   startRun: "/v1/workflows/start-run",
   runStep: "/v1/workflows/run-step",
@@ -79,6 +85,22 @@ const title: AdminDecoder = (value) => {
   if (!isString(value) || !value.trim().length || value.length > 160) throw new Error("Invalid workflow title.");
   return value;
 };
+/**
+ * A kind or a status. A newer host can add one in this capability, so the decoder accepts any short
+ * lowercase name and the client maps a name it does not know (see `remote-agent-decoding.ts`).
+ */
+const token: AdminDecoder = (value) => {
+  if (!isString(value) || !/^[a-z][a-z0-9-]{0,31}$/u.test(value)) throw new Error("Invalid workflow value.");
+  return value;
+};
+/** A whole number from 1, such as a run number, an attempt or a page size. */
+const ordinal =
+  (maximum: number): AdminDecoder =>
+  (value) => {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > maximum)
+      throw new Error("Invalid workflow number.");
+    return value;
+  };
 const finite =
   (maximum: number, positive: boolean): AdminDecoder =>
   (value) => {
@@ -122,29 +144,13 @@ const schedule: AdminDecoder = (value) =>
 const node = fields(
   {
     id: identifier,
-    kind: oneOf(
-      "text",
-      "prompt",
-      "asset",
-      "llm",
-      "agent",
-      "image",
-      "trigger",
-      "condition",
-      "approval",
-      "output",
-      "note",
-      "shape",
-    ),
+    kind: token,
     at: point,
     fields: nodeFields,
   },
   { size: fields({}, { width: size, height: size, font: size }), locked: boolean, schedule },
 );
-const edge = fields(
-  { id: identifier, from: identifier, to: identifier, type: oneOf("text", "image", "file") },
-  { branch: oneOf("yes", "no") },
-);
+const edge = fields({ id: identifier, from: identifier, to: identifier, type: token }, { branch: oneOf("yes", "no") });
 const stroke = fields({
   id: identifier,
   brush: identifier,
@@ -153,7 +159,7 @@ const stroke = fields({
   points: list(point, 2_000),
 });
 const graph = fields({ nodes: list(node, 200), edges: list(edge, 400), strokes: list(stroke, 500) });
-const runStatus = oneOf("running", "approval", "stopping", "done", "failed", "stopped");
+const runStatus = token;
 const summary = fields({
   id: identifier,
   title,
@@ -163,7 +169,7 @@ const summary = fields({
 });
 const trigger = fields({
   nodeId: identifier,
-  type: oneOf("manual", "schedule", "webhook", "message"),
+  type: token,
   nextDueAt: nullable(timestamp),
   webhookUrl: nullable(string(2_048)),
 });
@@ -173,13 +179,13 @@ const saveResult: AdminDecoder = (value) => {
   if (isDynamicRecord(value) && value.ok === false) return fields({ ok: boolean, conflict: detail })(value);
   throw new Error("Invalid workflow save result.");
 };
-const version = fields({ id: identifier, at: timestamp, kind: oneOf("auto", "restore", "run"), revision: count });
+const version = fields({ id: identifier, at: timestamp, kind: token, revision: count });
 const run = fields({
   id: identifier,
   workflowId: identifier,
-  number: count,
+  number: ordinal(Number.MAX_SAFE_INTEGER),
   triggerNodeId: nullable(identifier),
-  source: oneOf("manual", "schedule", "webhook"),
+  source: token,
   status: runStatus,
   error: nullable(stepText),
   startedAt: timestamp,
@@ -190,9 +196,9 @@ const step = fields({
   workflowId: identifier,
   runId: nullable(identifier),
   nodeId: identifier,
-  attempt: count,
+  attempt: ordinal(Number.MAX_SAFE_INTEGER),
   agentId: nullable(identifier),
-  status: oneOf("running", "approval", "done", "failed", "stopped", "skipped"),
+  status: token,
   output: nullable(stepText),
   branch: nullable(oneOf("yes", "no")),
   error: nullable(stepText),
@@ -219,6 +225,10 @@ export const WORKFLOWS_CODECS: ReadonlyMap<string, OptionalRouteCodec> = new Map
   [WORKFLOWS_ROUTES.delete, adminRoute(workflowRef, empty)],
   [WORKFLOWS_ROUTES.saveGraph, adminRoute(fields({ workflowId: identifier, baseRevision: count, graph }), saveResult)],
   [WORKFLOWS_ROUTES.versions, adminRoute(workflowRef, fields({ versions: list(version, 100) }))],
+  [
+    WORKFLOWS_ROUTES.versionGraph,
+    adminRoute(fields({ workflowId: identifier, versionId: identifier }), fields({ graph })),
+  ],
   [WORKFLOWS_ROUTES.restoreVersion, adminRoute(fields({ workflowId: identifier, versionId: identifier }), detail)],
   [
     WORKFLOWS_ROUTES.startRun,
@@ -232,7 +242,10 @@ export const WORKFLOWS_CODECS: ReadonlyMap<string, OptionalRouteCodec> = new Map
   [WORKFLOWS_ROUTES.stopRun, adminRoute(fields({ runId: identifier }), empty)],
   [WORKFLOWS_ROUTES.retryStep, adminRoute(fields({ stepId: identifier, requestId: identifier }), step)],
   [WORKFLOWS_ROUTES.decide, adminRoute(fields({ stepId: identifier, approved: boolean }), empty)],
-  [WORKFLOWS_ROUTES.runs, adminRoute(fields({ workflowId: identifier, limit: count }, { before: runCursor }), runPage)],
+  [
+    WORKFLOWS_ROUTES.runs,
+    adminRoute(fields({ workflowId: identifier, limit: ordinal(50) }, { before: runCursor }), runPage),
+  ],
   [WORKFLOWS_ROUTES.run, adminRoute(fields({ runId: identifier }), runDetail)],
   [
     WORKFLOWS_ROUTES.rotateWebhookSecret,

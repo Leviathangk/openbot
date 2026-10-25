@@ -47,6 +47,9 @@ export const INPUT_LIMITS = {
   workflowStrokes: 500,
   workflowStrokePoints: 2_000,
   workflowTitle: 160,
+  // The JSON of one saved graph. A workflow and its triggers must fit one WebRTC frame (1.5 MiB of
+  // body) when a member reads it.
+  workflowGraphBytes: 1024 * 1024,
   workflowRunsPage: 50,
   // The input of one step: the outputs of the steps before it, joined.
   workflowStepInput: 32_000,

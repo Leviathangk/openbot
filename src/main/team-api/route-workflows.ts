@@ -23,13 +23,13 @@ import {
   parseCreateWorkflow,
   parseDecideWorkflowStep,
   parseRenameWorkflow,
-  parseRestoreWorkflowVersion,
   parseRetryWorkflowStep,
   parseRunWorkflowStep,
   parseSaveWorkflowGraph,
   parseStartWorkflowRun,
   parseWorkflowRuns,
   parseWorkflowTrigger,
+  parseWorkflowVersion,
 } from "../ipc/workflow-inputs";
 import type { TeamApiAgents, TeamApiWorkflows } from "./dependencies";
 import { HttpError } from "./http-error";
@@ -231,12 +231,17 @@ export async function routeWorkflows(
       await visibleDetail(workflowId);
       return json(200, { versions: await run(workflows.versions(workflowId)) });
     }
-    case WORKFLOWS_ROUTES.restoreVersion: {
-      const input = parse(parseRestoreWorkflowVersion, body);
-      const current = await visibleDetail(input.workflowId);
+    case WORKFLOWS_ROUTES.versionGraph: {
+      const input = parse(parseWorkflowVersion, body);
+      await visibleDetail(input.workflowId);
       const graph = await run(workflows.versionGraph(input));
-      if (graph === null) throw new HttpError(404, sourceText("error.workflow.versionMissing"));
-      requireChange(current.graph, graph);
+      if (!visibleGraph(graph, listed())) throw new HttpError(404, sourceText("error.workflow.versionMissing"));
+      return json(200, fitted({ graph }));
+    }
+    case WORKFLOWS_ROUTES.restoreVersion: {
+      const input = parse(parseWorkflowVersion, body);
+      const current = await visibleDetail(input.workflowId);
+      requireChange(current.graph, await run(workflows.versionGraph(input)));
       return json(200, memberDetail(await run(workflows.restoreVersion(input))));
     }
     case WORKFLOWS_ROUTES.startRun: {

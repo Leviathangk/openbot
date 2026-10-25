@@ -5,7 +5,8 @@
 // without the chat level, keep the messaging place of an output to an owner or admin, keep the webhook
 // URL and secret from a member, clip step texts, drop the step of an agent that is hidden now, hide a
 // workflow of a local-only provider, refuse a workflow too large for one frame, and tell the member's
-// event socket about a change.
+// event socket about a change. The codec carries kinds and statuses that this app does not know, and
+// the client shows a workflow with such a node read-only; a member reads the graph of an old version.
 // Agent steps answer through stand-ins, so no provider CLI starts and no model turn is sent.
 // Run: `bun scripts/workflow-team-api-e2e.ts`.
 // Writes .openbot-build/workflow-team-api-e2e/report.json.
@@ -47,6 +48,11 @@ import { WorkflowRunStore } from "../src/backend/workflows/workflow-run-store";
 import { WorkflowStore } from "../src/backend/workflows/workflow-store";
 import { workflowScheduleDueAt } from "../src/backend/workflows/workflow-triggers";
 import { createWorkflows, type WorkflowsHandle } from "../src/backend/workflows/workflows";
+import {
+  decodeRemoteWorkflowDetail,
+  decodeRemoteWorkflowRunDetail,
+  decodeRemoteWorkflowVersions,
+} from "../src/main/remote-workflow-decoding";
 import type { TeamApiBrowser } from "../src/main/team-api/dependencies";
 
 const OUT = resolve(import.meta.dirname, "../.openbot-build/workflow-team-api-e2e");
@@ -342,6 +348,7 @@ async function wire(path: string, token: string, body: unknown): Promise<{ statu
 /** The refusals that these checks expect. */
 type RefusalKey =
   | "error.workflow.missing"
+  | "error.workflow.versionMissing"
   | "error.workflow.tooLargeToSend"
   | "error.team.agentViewOnly"
   | "error.team.adminRequired";
@@ -352,6 +359,13 @@ async function refused(path: string, token: string, body: unknown, status: numbe
   assert.equal(response.status, status, `${path} returned ${response.status}: ${JSON.stringify(response.body)}`);
   assert.ok(JSON.stringify(response.body).includes(sourceText(key)), JSON.stringify(response.body));
   return response.status;
+}
+
+/** What a client makes of a 200 answer that a host sends: the frozen codec, then `decode`. */
+function answer<T>(path: string, body: unknown, decode: (value: unknown) => T): T {
+  const codec = WORKFLOWS_CODECS.get(path);
+  assert.ok(codec, `No workflows-v1 codec for ${path}.`);
+  return decode(codec.response(200, body));
 }
 
 async function ok(path: string, token: string, body: unknown): Promise<JsonObject> {
@@ -657,6 +671,150 @@ try {
     const graph = (await runCauseEffect(current().workflows.get(restored.id))).graph;
     assert.ok(!JSON.stringify(graph).includes(closed), "The restore put the closed agent back.");
     return { status };
+  });
+
+  await step("version graph: a member reads an old version, but not one that names the closed agent", async () => {
+    const first = await hostWorkflow("Versions", agentGraph(open));
+    const versions = decodeRemoteWorkflowVersions(
+      await ok(WORKFLOWS_ROUTES.versions, member, { workflowId: first.id }),
+    );
+    const [version] = versions;
+    assert.ok(version, "The first save made no version.");
+    const read = await ok(WORKFLOWS_ROUTES.versionGraph, member, { workflowId: first.id, versionId: version.id });
+    assert.deepEqual(read.graph, agentGraph(open));
+    const closedWorkflow = await hostWorkflow("Versions closed", agentGraph(closed));
+    const [closedVersion] = await runCauseEffect(current().workflows.versions(closedWorkflow.id));
+    assert.ok(closedVersion);
+    // The owner takes the closed agent out; its old version still names it.
+    const saved = await runCauseEffect(
+      current().workflows.saveGraph({
+        workflowId: closedWorkflow.id,
+        baseRevision: closedWorkflow.revision,
+        graph: agentGraph(open),
+      }),
+    );
+    assert.ok(saved.ok);
+    const hidden = await refused(
+      WORKFLOWS_ROUTES.versionGraph,
+      member,
+      { workflowId: closedWorkflow.id, versionId: closedVersion.id },
+      404,
+      "error.workflow.versionMissing",
+    );
+    const missing = await refused(
+      WORKFLOWS_ROUTES.versionGraph,
+      member,
+      { workflowId: first.id, versionId: "no-such-version" },
+      404,
+      "error.workflow.versionMissing",
+    );
+    return { read: 200, hidden, missing };
+  });
+
+  await step("open values: unknown kinds and statuses cross, and the client shows them read-only", async () => {
+    const detail = {
+      summary: {
+        id: "w",
+        title: "Newer",
+        steps: 2,
+        updatedAt: "2026-10-25T00:00:00.000Z",
+        lastRun: { status: "paused", at: "2026-10-25T00:00:00.000Z" },
+      },
+      graph: {
+        nodes: [
+          { ...promptNode, extra: "dropped" },
+          {
+            id: "video",
+            kind: "video",
+            at: at(300),
+            fields: { prompt: "A cat." },
+            schedule: { kind: "daily", time: "09:00" },
+          },
+        ],
+        edges: [
+          { id: "to-video", from: "prompt", to: "video", type: "text" },
+          { id: "audio", from: "prompt", to: "video", type: "audio" },
+        ],
+        strokes: [],
+      },
+      revision: 3,
+      triggers: [{ nodeId: "video", type: "chat", nextDueAt: null, webhookUrl: null }],
+    };
+    const shown = answer(WORKFLOWS_ROUTES.get, detail, decodeRemoteWorkflowDetail);
+    assert.equal(shown.needsNewerApp, true);
+    assert.equal(shown.summary.lastRun?.status, "stopped");
+    assert.deepEqual(
+      shown.graph.nodes.map(({ id, kind, locked }) => ({ id, kind, locked })),
+      [
+        { id: "prompt", kind: "prompt", locked: undefined },
+        { id: "video", kind: "note", locked: true },
+      ],
+    );
+    assert.equal(shown.graph.nodes[1]?.schedule, undefined);
+    assert.equal(shown.graph.nodes[1]?.fields.prompt, "A cat.", "The placeholder lost the node's settings.");
+    assert.deepEqual(shown.graph.edges, []);
+    assert.equal(shown.triggers[0]?.type, "manual");
+    const known = answer(
+      WORKFLOWS_ROUTES.get,
+      { ...detail, graph: { nodes: [promptNode], edges: [], strokes: [] } },
+      decodeRemoteWorkflowDetail,
+    );
+    assert.equal(known.needsNewerApp, undefined, "A graph of known kinds was marked read-only.");
+    const newerRun = {
+      id: "r",
+      workflowId: "w",
+      number: 1,
+      triggerNodeId: null,
+      source: "chat",
+      status: "paused",
+      error: null,
+      startedAt: "2026-10-25T00:00:00.000Z",
+      endedAt: null,
+    };
+    const run = answer(
+      WORKFLOWS_ROUTES.run,
+      {
+        run: newerRun,
+        steps: [
+          {
+            id: "s",
+            workflowId: "w",
+            runId: "r",
+            nodeId: "prompt",
+            attempt: 1,
+            agentId: null,
+            status: "queued",
+            output: null,
+            branch: null,
+            error: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        ],
+      },
+      decodeRemoteWorkflowRunDetail,
+    );
+    assert.deepEqual([run.run.source, run.run.status, run.steps[0]?.status], ["manual", "stopped", "stopped"]);
+    // A name that is not a short lowercase id is still malformed.
+    assert.throws(() => answer(WORKFLOWS_ROUTES.get, { ...detail, revision: -1 }, decodeRemoteWorkflowDetail));
+    assert.throws(() =>
+      answer(
+        WORKFLOWS_ROUTES.run,
+        { run: { ...newerRun, status: "Not a name" }, steps: [] },
+        decodeRemoteWorkflowRunDetail,
+      ),
+    );
+    // This host does not know the kind, so its save refuses it after the codec passes it.
+    const target = await hostWorkflow("Newer save", { nodes: [promptNode], edges: [], strokes: [] });
+    const save = await wire(WORKFLOWS_ROUTES.saveGraph, ownerToken, {
+      workflowId: target.id,
+      baseRevision: target.revision,
+      graph: { nodes: [promptNode, { id: "video", kind: "video", at: at(300), fields: {} }], edges: [], strokes: [] },
+    });
+    assert.equal(save.status, 400, JSON.stringify(save.body));
+    assert.throws(() => WORKFLOWS_CODECS.get(WORKFLOWS_ROUTES.runs)?.request({ workflowId: "w", limit: 0 }));
+    assert.throws(() => WORKFLOWS_CODECS.get(WORKFLOWS_ROUTES.runs)?.request({ workflowId: "w", limit: 51 }));
+    return { placeholder: "note, locked", edges: 0, run: "manual/stopped", save: save.status };
   });
 
   await step("webhook: the URL goes to the owner only, and only the owner makes a new secret", async () => {
