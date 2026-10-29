@@ -6,6 +6,7 @@ import {
   hostedSiteConversationEvent,
   isChannelChangeMarker,
   isContextResetMarker,
+  isPlanContinuationMarker,
   isVaultChangeMarker,
   marketplaceSuggestionEvent,
   mcpSignInEvent,
@@ -339,6 +340,8 @@ function chatActionMarker(
   if (isChannelChangeMarker(message))
     return { kind: "channel-change", text: message.text, timestamp: message.createdAt };
   if (isVaultChangeMarker(message)) return { kind: "vault-change", text: message.text, timestamp: message.createdAt };
+  if (isPlanContinuationMarker(message))
+    return { kind: "plan-continuation", text: message.text, timestamp: message.createdAt };
   const skillEvent = skillConversationEvent(message);
   if (skillEvent) return { ...skillEvent, kind: "skill-lifecycle", timestamp: message.createdAt };
   const suggestion = marketplaceSuggestionEvent(message);

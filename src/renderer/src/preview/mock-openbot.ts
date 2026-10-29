@@ -109,6 +109,7 @@ import {
   type OpenBotDesktopApi,
   type OpenSharedFileInput,
   type OpenWorkspaceFileInput,
+  PLAN_CONTINUATION_ITEM_TYPE,
   type PromptCacheTtlSetting,
   type ProviderAccountStatus,
   type ProviderDetectionSettings,
@@ -2581,9 +2582,23 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
                 },
               ]
             : [];
+          // A message that asks for a plan ends with open steps, so the agent continues by itself.
+          const planContinuation: ConversationMessage[] = /\bplan\b/iu.test(input.text)
+            ? [
+                {
+                  id: `${turnId}:plan-continuation`,
+                  author: "system",
+                  source: "system",
+                  text: sourceText("status.agent.planContinues", { current: 1, limit: 3 }),
+                  createdAt: new Date().toISOString(),
+                  status: "completed",
+                  itemType: PLAN_CONTINUATION_ITEM_TYPE,
+                },
+              ]
+            : [];
           updateSnapshot(input.agentId, (snapshot) => {
             snapshot.activeTurnId = null;
-            snapshot.messages = [...snapshot.messages, assistantMessage, ...memoryMessage];
+            snapshot.messages = [...snapshot.messages, assistantMessage, ...memoryMessage, ...planContinuation];
           });
           queues.set(input.agentId, {
             agentId: input.agentId,

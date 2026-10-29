@@ -154,6 +154,8 @@ export type ChatActionMarkerModel =
   /** A member agent changed the channel at a person's request. `text` is the host's note. */
   | { kind: "channel-change"; text: string; timestamp: string }
   | { kind: "vault-change"; text: string; timestamp: string }
+  /** The agent continues by itself, because its plan still has open steps. `text` is the host's note. */
+  | { kind: "plan-continuation"; text: string; timestamp: string }
   | {
       kind: "unavailable";
       label: string;
