@@ -1364,8 +1364,14 @@ export class ProviderRuntime implements ProviderPort {
     if (!options.automatic) this.#startFailures.clear();
     // A refresh cancels a sign-in that has not finished. The sign-in process of an expired account
     // writes a 401 for the old token, and the renderer refreshes after each auth error, so the
-    // sign-in would end before the user enters the code. The sign-in is what fixes that error.
-    if (options.automatic && (this.#codexLogin.pending || this.#cliLogin.size > 0)) return this.status();
+    // sign-in would end before the user enters the code. The sign-in is what fixes that error. A
+    // sign-in that is starting runs as a connection command, and the refresh would wait for it and
+    // then cancel it.
+    if (
+      options.automatic &&
+      (this.#codexLogin.pending || this.#cliLogin.size > 0 || this.#providerConnectionCommands.size > 0)
+    )
+      return this.status();
     if (this.#providerRefresh) return yield* Deferred.await(this.#providerRefresh);
     if (this.#status.phase === "starting" || this.#status.phase === "restarting") return this.status();
     const completion = Deferred.makeUnsafe<AgentStatus, ProviderOperationFailed>();
@@ -1629,6 +1635,35 @@ export class ProviderRuntime implements ProviderPort {
     const accounts = yield* this.#requireAccounts(provider);
     yield* accounts.remove(provider, accountId).pipe(toProviderOperationFailed);
     return this.status();
+  }, Effect.uninterruptible).bind(this);
+
+  /**
+   * Signs the provider's own sign-in out and reports it signed out. Its agents wait for a sign-in;
+   * the provider's other accounts wait until it connects again.
+   */
+  readonly signOutProvider = Effect.fn("ProviderRuntime.signOutProvider")(function* (
+    this: ProviderRuntime,
+    provider: AgentProvider,
+  ) {
+    const accounts = yield* this.#requireAccounts(provider);
+    // Codex signs in, by browser or by code, through its own login client.
+    const codex = requireProviderDriver(provider).signIn.kind === "browser";
+    return yield* this.#runProviderConnectionCommand(provider, () =>
+      Effect.gen({ self: this }, function* () {
+        // The sign-out removes the credential that a running turn uses.
+        if (this.#hooks.isProviderBusy(provider)) {
+          return yield* new ProviderOperationFailed({
+            cause: new Error(sourceText("error.provider.cliBusySignOut", { provider: providerLabel(provider) })),
+          });
+        }
+        // A sign-in that finished after the sign-out would sign the provider in again.
+        yield* codex ? this.#codexLogin.cancel(null) : this.#cancelCliLogin(provider);
+        const disposals = this.#disposals;
+        yield* accounts.signOutDefault(provider).pipe(toProviderOperationFailed);
+        yield* this.#endSignedOutClient(provider, disposals);
+        return this.status();
+      }),
+    );
   }, Effect.uninterruptible).bind(this);
 
   /** Whether the provider has a saved API key. */
