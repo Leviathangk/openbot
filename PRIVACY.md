@@ -1018,9 +1018,11 @@ Signal then asks the account service to link the chat to the computer. The accou
 the Telegram chat ID, the bot ID, the computer, the OpenBot account and the time of the link, and a
 hash of each code until it is used or expires. It keeps no chat name and no message.
 
-Telegram sends each update of a linked chat, which contains the messages that mention the bot or reply
-to it, the messages of a direct chat, and button presses, to Signal. Signal checks Telegram's secret
-header and reads only the chat ID, a link code and the ID of a button press, to find the computer. It
+Telegram sends each update of a linked chat, which contains every message of a group or a direct chat
+and button presses, to Signal. Signal checks Telegram's secret
+header and reads only the chat ID, a link code and the ID of a button press, to find the computer, and
+the chat type, the entity types and whether a message replies or is in a thread, to know whether it
+can address OpenBot. It
 passes each update to that computer over its Signal connection, in transit only: it does not store or
 log it. The computer's answers, status posts, reactions and files go to Telegram through Signal,
 because only Signal has the token. Signal accepts only a fixed list of Bot API calls, only for the
@@ -1036,11 +1038,13 @@ short-lived signed addresses, in transit only.
   for context, until OpenBot quits. Workspace memories are kept for each chat, as for Slack.
   Disconnect makes the bot leave the chat, unlinks it and keeps the conversations and the workspace
   memories; deleting an agent removes its conversations.
-- **Read from Telegram.** The messages that mention the bot, replies to it and the other messages of a
-  reply chain that Telegram sends, the messages of a direct chat, the message that a request
-  answers, the files in them, the names of their authors and the name of the chat. With privacy
-  mode on, which is Telegram's default for a bot, Telegram sends a bot only messages that mention it,
-  replies to it and commands.
+- **Read from Telegram.** Every message of a linked chat, the files in them, the names of their
+  authors and the name of the chat. The OpenBot bot has privacy mode off, because with it on,
+  Telegram does not send a plain mention to a bot that is not a group admin. A request starts only
+  from a message that mentions the bot, a reply to it, another message of a reply chain that an
+  agent answers, or a message of a direct chat. The other messages of a group stay in the
+  computer's memory until OpenBot quits, and an agent can read the last of them with its history
+  tool, as for Slack.
 - **Given to the Telegram Orchestrator.** Every new Telegram request goes first to the orchestrator
   agent, which runs on its provider like any other agent and passes the work to a teammate with the
   facts it needs.
