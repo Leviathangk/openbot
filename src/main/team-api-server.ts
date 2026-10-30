@@ -113,6 +113,7 @@ import {
   WEBHOOK_TESTS_CAPABILITY,
   WORKFLOWS_CAPABILITY,
 } from "@openbot/contracts/team-protocol/current";
+import { CUSTOM_PROVIDER_HARNESS_CAPABILITY } from "@openbot/contracts/team-protocol/custom-provider-harness-v1";
 import { FOCUS_USE_INTERVAL_MS } from "@openbot/contracts/team-protocol/focus-use-v1";
 import {
   HOST_RESTART_EVENT,
@@ -2006,7 +2007,8 @@ export class TeamApiServer {
           capability === PROVIDERS_RUNTIMES_V2_CAPABILITY ||
           capability === PROVIDERS_V4_CAPABILITY ||
           capability === PROVIDERS_V5_CAPABILITY ||
-          capability === PROVIDERS_V8_CAPABILITY
+          capability === PROVIDERS_V8_CAPABILITY ||
+          capability === CUSTOM_PROVIDER_HARNESS_CAPABILITY
         )
           return this.#options.admin?.providers !== undefined;
         if (capability === CLAUDE_API_KEY_CAPABILITY) return this.#options.admin?.providers !== undefined;
