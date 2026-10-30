@@ -401,6 +401,17 @@ with no key stored those models can only come from the user's own OpenCode sign-
 buy them. Neither `/models` endpoint authenticates, so entitlement cannot be read back and the
 split is a product rule rather than a check.
 
+The CLI reports no Go quota over ACP. `readOpenCodeGoUsage` (`src/backend/opencode-usage.ts`)
+sends `opencode.ai/zen/go/v1/usage` the key the CLI uses. A saved key is the only key: the CLI
+applies config `options.apiKey` last. With no saved key, it reads the CLI's own keys in the order
+T3 Code uses: the active OpenCode Console row (`integration_id = 'opencode'`, `type: "key"`, no
+self-hosted `metadata.server`) in the `credential` table of `$XDG_DATA_HOME/opencode/opencode.db`
+(or `OPENCODE_DB`), then the Go key: the `opencode-go` key of `auth.json` (or `OPENCODE_AUTH_CONTENT`,
+which also skips the database), or `OPENCODE_API_KEY` when that has none (#3548). A 401 or 403 on the
+Console key tries the Go key. The
+database is opened read-only with a 100 ms busy timeout, because Effect cannot interrupt a blocked
+SQLite call. `scripts/opencode-go-usage-e2e.ts` covers it.
+
 `PREFERRED_MODEL_ORDER` (in the same file) reorders that catalog, because a provider with no
 `defaultProviderModel` runs the first model of its list and OpenCode reports the third-party
 services the user signed in to before its own — so the fallback used to pick a model behind a token
