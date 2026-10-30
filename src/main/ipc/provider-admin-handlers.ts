@@ -87,6 +87,7 @@ import {
   parseRemoveProviderAccountInput,
   parseRenameProviderAccountInput,
   parseResetProviderUsageInput,
+  signInCodexWithApiKey,
 } from "./provider-handlers";
 import { scopedHandler, scopedQueryHandler } from "./scoped-handler";
 import { isObject, requireString } from "./validation";
@@ -109,6 +110,7 @@ interface ProviderAdminIpcDependencies {
     | "cancelProviderCodeLogin"
     | "changeProviderCredential"
     | "clearProviderCredential"
+    | "signInCodexWithApiKey"
   >;
   credentials: Pick<ProviderCredentialStore, "status" | "set" | "clear">;
   runtimes: Pick<
@@ -406,6 +408,7 @@ export function providerAdminIpcHandlers({
       }),
       setApiKey: scopedHandler(parseProviderApiKeyInput, {
         local: async ({ provider, key }) => {
+          if (provider === "codex") return signInCodexWithApiKey(service, key);
           await runCauseEffect(runtimes.ensureKeyProviderCli(provider));
           return runCauseEffect(
             service.changeProviderCredential(provider, () =>
