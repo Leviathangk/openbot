@@ -103,6 +103,7 @@ import {
   screen,
   shell,
   systemPreferences,
+  webContents,
 } from "electron";
 import { pasteCodeLoginSupported } from "../backend/agent/cli-code-login";
 import { toMcpGatewayFailed } from "../backend/agent/mcp-gateway";
@@ -504,7 +505,7 @@ export interface ApplicationServiceContext {
   macHapticFeedback: MacHapticFeedback;
   teardown: TeardownRegistry;
   forwardCentralAuth: (state: CentralAuthState) => void;
-  forwardBrowserDisplayState: (state: BrowserDisplayState) => void;
+  forwardBrowserDisplayState: (serverId: string, state: BrowserDisplayState) => void;
   forwardProviderRuntimeStatus: (snapshot: ProviderRuntimeSnapshot) => void;
   forwardVoiceModelStatus: (status: VoiceModelStatus) => void;
   forwardVoiceStreamTranscript: (transcript: VoiceStreamTranscript) => void;
@@ -1142,7 +1143,7 @@ export async function createApplicationServices({
     browser.setMainPageListener(null);
     browserDock.destroy();
   });
-  browser.onChanged((tabs, activeTabId) => forwardBrowserDisplayState({ tabs, activeTabId }));
+  browser.onChanged((tabs, activeTabId) => forwardBrowserDisplayState(LOCAL_SERVER_ID, { tabs, activeTabId }));
   const setupFile = join(app.getPath("userData"), SETUP_FILE);
   const analyticsPreferenceFile = join(app.getPath("userData"), ANALYTICS_PREFERENCE_FILE);
   const updatePreferenceFile = join(app.getPath("userData"), UPDATE_PREFERENCE_FILE);
@@ -2783,10 +2784,9 @@ export async function createApplicationServices({
   // After the servers: the view it opens belongs to one of them, and it has to stop before they do.
   const browserView = new BrowserViewClient({
     servers: remoteServers,
-    onEvent: (event) => {
-      const window = windows.getMainWindow();
-      if (!window || window.isDestroyed()) return;
-      sendToRenderer(window, IPC_ENDPOINTS.browser.liveViewEvent, event);
+    onEvent: (event, owner) => {
+      const contents = webContents.fromId(owner);
+      sendToRenderer(contents && BrowserWindow.fromWebContents(contents), IPC_ENDPOINTS.browser.liveViewEvent, event);
     },
   });
   teardown.push(TEARDOWN_ORDER.browserView, "the live browser view", () => runCauseEffect(browserView.stop()));

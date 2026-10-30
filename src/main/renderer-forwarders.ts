@@ -78,6 +78,7 @@ export interface RendererForwarderDependencies {
   getHostAnalytics: () => HostAnalytics | null;
   getRemoteServerManager: () => Pick<
     RemoteServerManager,
+    | "activeServerId"
     | "list"
     | "request"
     | "readAgentConversationPage"
@@ -139,6 +140,10 @@ export function createRendererForwarders({
     if (!window || window.isDestroyed()) return;
     const scoped = bufferedLive ? { serverId, event, bufferedLive } : { serverId, event };
     for (const target of appWindows()) sendToRenderer(target, IPC_ENDPOINTS.agent.scopedEvent, scoped);
+    // The local browser sends its own display state.
+    if (event.type === "browser-changed" && serverId !== LOCAL_SERVER_ID) {
+      forwardBrowserDisplayState(serverId, { tabs: event.tabs, activeTabId: event.activeTabId });
+    }
     // Once for the app, not once for each window.
     void notifyAgentEvent(serverId, event).catch(() => undefined);
     if (event.type === "channels-changed") refreshChannels(serverId);
@@ -512,7 +517,9 @@ export function createRendererForwarders({
     showRetainedNotification(notification);
   }
 
-  function forwardBrowserDisplayState(state: BrowserDisplayState): void {
+  /** Picture in Picture shows the tabs of the server in view, so the other servers' tabs stay out of it. */
+  function forwardBrowserDisplayState(serverId: string, state: BrowserDisplayState): void {
+    if (serverId !== (getRemoteServerManager()?.activeServerId ?? LOCAL_SERVER_ID)) return;
     for (const window of BrowserWindow.getAllWindows()) {
       sendToRenderer(window, IPC_ENDPOINTS.browser.displayState, state);
     }
