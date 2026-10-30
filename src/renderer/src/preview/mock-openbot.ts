@@ -5,6 +5,7 @@ import type {
   HiddenAgentsSnapshot,
   McpSignInApp,
   McpSignInAppState,
+  ServerNotificationLevel,
 } from "@openbot/contracts/ipc";
 import {
   type AccountUsage,
@@ -102,6 +103,7 @@ import {
   isMemoryReviewInterval,
   isPromptCacheTtl,
   isReleasedRoutineSchedule,
+  LOCAL_SERVER_ID,
   type MachineAlertSettings,
   type MacPermissionId,
   type MemoryReviewPreference,
@@ -488,6 +490,18 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
     return agentStatus;
   };
   let agents = clone(options.agents ?? STORY_AGENT_SUMMARIES);
+  /** The levels of the preview user on each server, kept for the session as each host keeps them. */
+  const agentNotificationLevels = new Map<string, Map<string, ServerNotificationLevel>>();
+  const notificationLevelsOf = (serverId: string | undefined) => {
+    const key = serverId ?? LOCAL_SERVER_ID;
+    const levels = agentNotificationLevels.get(key) ?? new Map<string, ServerNotificationLevel>();
+    agentNotificationLevels.set(key, levels);
+    return levels;
+  };
+  const notificationLevelsSnapshot = (levels: ReadonlyMap<string, ServerNotificationLevel>) => ({
+    server: null,
+    agents: [...levels].map(([agentId, level]) => ({ agentId, level })),
+  });
   // Two profiles, so the agent select and the manage dialog show a list. "Client B" has no agents.
   let browserProfiles: { id: string; name: string; hue: AvatarHue }[] = [
     { id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9", name: "Client A", hue: 215 },
@@ -1858,6 +1872,16 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
         emitAgentEvent({ type: "hidden-agents-changed", agents: snapshot.agents });
         emitAgentEvent({ type: "agents-changed", agents });
         return snapshot;
+      },
+      listAgentNotificationLevels: async (serverId) => notificationLevelsSnapshot(notificationLevelsOf(serverId)),
+      setAgentNotificationLevel: async ({ agentId, level }, serverId) => {
+        const known = serverId === storyForeignServerId ? [...agents, STORY_FOREIGN_AGENT] : agents;
+        if (!known.some((agent) => agent.id === agentId))
+          throw new Error(sourceText("error.agent.unknown", { id: agentId }));
+        const levels = notificationLevelsOf(serverId);
+        if (level === null) levels.delete(agentId);
+        else levels.set(agentId, level);
+        return notificationLevelsSnapshot(levels);
       },
       readAgentSessionSettings: async (agentId) => clone(previewSessionSettings(agentId)),
       setAgentSessionSetting: async ({ agentId, settingId, value }) => {
